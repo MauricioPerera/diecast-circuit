@@ -1,3 +1,6 @@
+import { ITEM_TYPES } from './race-items.js';
+import './items.css';
+
 const icons = {
   car: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m4 10 2-6h12l2 6m-17 1h18v7H3zM6 18v3m12-3v3M6 14h2m8 0h2M4 10h16"/></svg>',
   arrow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12h15m-6-6 6 6-6 6"/></svg>',
@@ -63,6 +66,14 @@ export function createUI(options) {
       <div class="route-overview"><canvas id="minimap" width="320" height="200" aria-label="Mapa del circuito"></canvas><span class="route-percent">0%</span></div>
       <div class="race-progress" aria-label="Progreso del circuito"><div></div></div>
       <div class="race-online-position" hidden><strong></strong><span></span></div>
+      <div class="race-items" hidden>
+        <p class="item-notice" role="status"></p>
+        <button class="item-button" type="button" aria-label="Usar objeto" disabled>
+          <span class="item-symbol" aria-hidden="true"></span>
+          <span class="item-copy"><strong>Recoge una caja</strong><small></small></span>
+          <kbd aria-hidden="true">E</kbd>
+        </button>
+      </div>
       <div class="speed-cluster"><div class="speed-number">0</div><div class="speed-units">KM/H <span class="speed-gear">N</span></div><div class="nitro-label">${icons.bolt}<span>NITRO</span><span class="nitro-key">SHIFT / ESPACIO</span></div><div class="nitro-meter" role="meter" aria-label="Reserva de nitro" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><span></span></div><div class="nitro-hint">Recarga al soltar</div></div>
       <div class="race-desktop-help"><kbd>W / ↑</kbd> ACELERAR <span>·</span> <kbd>S / ↓</kbd> FRENAR <span>·</span> <kbd>A D / ← →</kbd> GIRAR <span>·</span> <kbd>R</kbd> REINICIAR</div>
     </section>
@@ -106,6 +117,12 @@ export function createUI(options) {
   bind(find('.pause-button'), 'click', () => dispatch('onPause'));
   bind(find('.mute-button'), 'click', () => dispatch('onMute'));
   bind(find('.camera-button'), 'click', () => dispatch('onCamera'));
+  const itemBox = find('.race-items');
+  const itemButton = find('.item-button');
+  const itemName = find('.item-copy strong');
+  const itemHint = find('.item-copy small');
+  const itemNotice = find('.item-notice');
+  bind(itemButton, 'click', () => dispatch('onItem'));
   bind(find('.modal-primary'), 'click', () => dispatch(currentMode === 'paused' ? 'onResume' : 'onRetry'));
   bind(find('.modal-retry'), 'click', () => dispatch('onRetry'));
   bind(find('.modal-menu'), 'click', () => dispatch('onMenu'));
@@ -146,6 +163,18 @@ export function createUI(options) {
     if (view.online) {
       position.querySelector('strong').textContent = `${view.online.position} / ${view.online.total}`;
       position.querySelector('span').textContent = `SALA ${view.online.code}`;
+    }
+    itemBox.hidden = !view.items;
+    if (view.items) {
+      const { kind, usable, shielded, notice } = view.items;
+      const item = ITEM_TYPES[kind];
+      const name = item?.name ?? (shielded ? 'Escudo activo' : 'Recoge una caja');
+      const hint = item?.hint ?? '';
+      if (itemName.textContent !== name) itemName.textContent = name;
+      if (itemHint.textContent !== hint) itemHint.textContent = hint;
+      if (itemNotice.textContent !== notice) itemNotice.textContent = notice;
+      if (itemButton.dataset.item !== (kind ?? 'empty')) itemButton.dataset.item = kind ?? 'empty';
+      itemButton.disabled = !usable;
     }
     const vehicleName=view.vehicle?.name||'GT 02';
     if(vehicleName!==lastVehicleName){find('.menu-vehicle-name').textContent=vehicleName;find('.hud-vehicle-name').textContent=vehicleName;lastVehicleName=vehicleName;}

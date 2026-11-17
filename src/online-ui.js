@@ -76,6 +76,7 @@ export function createOnlineUI({ courses, assists, onCreate, onJoin, onReady, on
             <h2 id="online-settings-title">Configuración</h2>
             <label class="online-field" for="online-course"><span>Circuito</span><select id="online-course"></select></label>
             <label class="online-field" for="online-assist"><span>Asistencia</span><select id="online-assist"></select></label>
+            <label class="online-field" for="online-items"><span>Objetos en pista</span><select id="online-items"><option value="on">Activados</option><option value="off">Desactivados</option></select></label>
           </section>
         </div>
         <footer class="online-match-footer">
@@ -100,6 +101,7 @@ export function createOnlineUI({ courses, assists, onCreate, onJoin, onReady, on
   const code = find('#online-code');
   const course = find('#online-course');
   const assist = find('#online-assist');
+  const items = find('#online-items');
   const roster = find('.online-players');
   const errorBox = find('.online-error');
   const phase = find('.online-phase');
@@ -164,10 +166,11 @@ export function createOnlineUI({ courses, assists, onCreate, onJoin, onReady, on
   bind(start, 'click', () => onStart());
   bind(rematch, 'click', () => onRematch());
   function changeSettings() {
-    onSettings({ courseId: course.value, assistId: assist.value });
+    onSettings({ courseId: course.value, assistId: assist.value, itemsEnabled: items.value === 'on' });
   }
   bind(course, 'change', changeSettings);
   bind(assist, 'change', changeSettings);
+  bind(items, 'change', changeSettings);
 
   async function copyInvite(withLink) {
     const selectedCode = current.room?.code;
@@ -276,7 +279,9 @@ export function createOnlineUI({ courses, assists, onCreate, onJoin, onReady, on
     const allReady = room.players.length >= 2 && room.players.every(player => player.id === room.hostId || player.ready);
     if (course.value !== room.courseId) course.value = room.courseId;
     if (assist.value !== room.assistId) assist.value = room.assistId;
-    course.disabled = assist.disabled = !host || !lobby;
+    const itemChoice = room.itemsEnabled ? 'on' : 'off';
+    if (items.value !== itemChoice) items.value = itemChoice;
+    course.disabled = assist.disabled = items.disabled = !host || !lobby;
     ready.hidden = !lobby || host || !self;
     showText(ready, self?.ready ? 'Aún no estoy listo' : 'Estoy listo');
     ready.setAttribute('aria-pressed', String(Boolean(self?.ready)));

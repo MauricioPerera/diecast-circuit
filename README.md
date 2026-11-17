@@ -24,6 +24,12 @@ El contenido de `dist/` se puede servir en un hosting estático, incluso bajo un
 
 En el menú, abre **Multijugador**, escribe un apodo y pulsa **Crear sala**. Comparte el código de seis caracteres o el enlace de invitación. El anfitrión puede invitar hasta a siete pilotos, elegir uno de los cinco circuitos del juego y fijar la asistencia. Los invitados confirman que están listos y el anfitrión inicia la carrera. Cada piloto lleva el coche que seleccionó en el garaje.
 
+Las salas nuevas tienen **Objetos en pista** activados. Pasa por una caja turquesa para recoger un objeto aleatorio. Puedes guardar uno y usarlo con **E** o con el botón **Usar objeto** en la pantalla. Las cajas vuelven a aparecer al cabo de unos segundos.
+
+- **Disco**. Sale hacia delante por tu carril. Alinea el coche con el rival antes de disparar.
+- **Trampa**. Queda detrás de ti y frena al primer rival que la pise.
+- **Escudo**. Absorbe un impacto mientras está activo.
+
 La sala sincroniza la salida, retransmite la posición de los coches y ordena los tiempos al terminar. Es una carrera casual con física local y coches que se pueden atravesar. Si un piloto abandona o se le acaba el tiempo, aparece como **No terminó**. La revancha conserva el mismo código.
 
 Para jugar en este equipo, abre una segunda terminal en `racing` y arranca el servidor local con Wrangler 4 (`npm exec --package=wrangler@4.103.0 -- wrangler dev --local --ip 127.0.0.1 --port 8787` si no está instalado):
@@ -51,6 +57,7 @@ Abre el juego en dos ventanas del navegador e invita a la segunda. `npm run test
 | Frenar | S / ↓ |
 | Dirección | A y D / ← y → |
 | Nitro | Shift / Espacio |
+| Usar objeto en línea | E |
 | Cambiar cámara | C |
 | Pausa / continuar | Esc |
 | Reintentar | R |

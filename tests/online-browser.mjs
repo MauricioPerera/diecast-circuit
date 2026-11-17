@@ -14,8 +14,8 @@ const action = (page, key) => page.locator(`[data-online-action="${key}"]`);
 const playerCount = page => page.locator('.online-players li').count();
 const waitMode = (page, mode) => page.waitForFunction(value => window.__THREE_GAME_DIAGNOSTICS__?.mode === value, mode, { timeout: 40000 });
 
-async function pilot(viewport) {
-  const context = await browser.newContext({ viewport, permissions: ['clipboard-read', 'clipboard-write'] });
+async function pilot(viewport, mobile = false) {
+  const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile, permissions: ['clipboard-read', 'clipboard-write'] });
   const page = await context.newPage();
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
@@ -24,7 +24,7 @@ async function pilot(viewport) {
 
 try {
   const host = await pilot({ width: 1440, height: 900 });
-  const guest = await pilot({ width: 390, height: 844 });
+  const guest = await pilot({ width: 390, height: 844 }, true);
   await host.goto(game.href);
   await host.getByRole('button', { name: 'Multijugador' }).click();
   await host.locator('#online-name').fill('Alba');
@@ -48,6 +48,12 @@ try {
   assert.equal(await playerCount(guest), 2);
   assert.equal(await action(host, 'start').isDisabled(), true);
   assert.equal(await guest.locator('#online-course').isDisabled(), true);
+  assert.equal(await guest.locator('#online-items').isDisabled(), true);
+  assert.equal(await guest.locator('#online-items').inputValue(), 'on');
+  await host.locator('#online-items').selectOption('off');
+  await guest.waitForFunction(() => document.querySelector('#online-items').value === 'off');
+  await host.locator('#online-items').selectOption('on');
+  await guest.waitForFunction(() => document.querySelector('#online-items').value === 'on');
   await host.locator('#online-course').selectOption('garage');
   await guest.waitForFunction(() => document.querySelector('#online-course').value === 'garage');
   await action(guest, 'ready').click();
@@ -62,11 +68,31 @@ try {
   await host.keyboard.down('w');
   await host.keyboard.down('Shift');
   await Promise.all([waitMode(host, 'racing'), waitMode(guest, 'racing')]);
+  await guest.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__.items.boxes === 12);
   // Let the host move ahead before the guest starts accelerating.
   await guest.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__.online.opponents > 0);
   await guest.screenshot({ path: 'artifacts/online-qa/remote-car.png' });
   await guest.keyboard.down('w');
   await host.keyboard.down('w');
+  await guest.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__.distance > 6);
+  await guest.keyboard.down('a');
+  await guest.waitForFunction(() => Boolean(window.__THREE_GAME_DIAGNOSTICS__.items.held));
+  await guest.keyboard.up('a');
+  await host.waitForFunction(() => Boolean(window.__THREE_GAME_DIAGNOSTICS__.items.held));
+  const held = (page) => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__.items.held);
+  const hostItem = await held(host), guestItem = await held(guest);
+  const itemBounds = await guest.getByRole('button', { name: 'Usar objeto' }).boundingBox();
+  const gasBounds = await guest.locator('[data-touch=throttle]').boundingBox();
+  assert.ok(itemBounds.height >= 44 && itemBounds.y + itemBounds.height < gasBounds.y);
+  await guest.screenshot({ path: 'artifacts/online-qa/mobile-item.png' });
+  await guest.waitForFunction(() => Math.abs(window.__THREE_GAME_DIAGNOSTICS__.offset) < .67);
+  await host.keyboard.press('e');
+  await guest.getByRole('button', { name: 'Usar objeto' }).tap();
+  await Promise.all([host, guest].map(page => page.waitForFunction(() => !window.__THREE_GAME_DIAGNOSTICS__.items.held)));
+  if ((hostItem === 'trap' && guestItem !== 'shield') || (guestItem === 'disc' && hostItem !== 'shield')) {
+    await Promise.any([host, guest].map(page => page.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__.stun > 0, undefined, { timeout: 3600 })));
+    console.log(`PASS live impact (${hostItem}, ${guestItem})`);
+  }
   await Promise.all([host.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__.distance > 80), guest.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__.distance > 30)]);
   await host.keyboard.up('Shift');
   let hostJumped = false, guestJumped = false, remoteJumped = false;
@@ -91,6 +117,7 @@ try {
   await action(guest, 'leave').click();
   await waitMode(guest, 'menu');
   assert.deepEqual(errors, []);
+  console.log(`PASS synchronized pickups and keyboard/touch item use (${hostItem}, ${guestItem})`);
   console.log('PASS two browsers, shared start, synchronized jumps, two finishes, rematch and host transfer');
   console.log(JSON.stringify(finished.map(({ name, time }) => ({ name, time }))));
 } finally {

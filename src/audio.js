@@ -25,6 +25,6 @@ export function createAudio() {
     unlock,
     mute(value){muted=value;if(master)master.gain.setTargetAtTime(muted?0:.16,context.currentTime,.03);},
     update(speed,nitro,active){if(!context)return;const t=context.currentTime;engine.frequency.setTargetAtTime(35+speed*5.8,t,.07);filter.frequency.setTargetAtTime(190+speed*32,t,.1);gain.gain.setTargetAtTime(active?.20+speed*.004:0,t,.07);boostGain.gain.setTargetAtTime(active&&nitro?.45:0,t,.06);},
-    event(name){if(name==='go')tone(880,.3,'square',.18);if(name==='tick')tone(440,.09,'square',.13);if(name==='scrape')tone(95,.18,'sawtooth',.4);if(name==='land')tone(120,.11,'triangle',.24);if(name==='crash')tone(65,.7,'sawtooth',.4);if(name==='finish'){tone(660,.6,'triangle');setTimeout(()=>tone(880,.6,'triangle'),150);setTimeout(()=>tone(1320,.7,'triangle'),300);}},
+    event(name){if(name==='go')tone(880,.3,'square',.18);if(name==='tick')tone(440,.09,'square',.13);if(name==='scrape')tone(95,.18,'sawtooth',.4);if(name==='land')tone(120,.11,'triangle',.24);if(name==='crash')tone(65,.7,'sawtooth',.4);if(name==='item-pickup')tone(720,.18,'triangle',.28);if(name==='item-use')tone(340,.22,'triangle',.26);if(name==='item-hit')tone(87,.34,'sawtooth',.31);if(name==='finish'){tone(660,.6,'triangle');setTimeout(()=>tone(880,.6,'triangle'),150);setTimeout(()=>tone(1320,.7,'triangle'),300);}},
   };
 }

@@ -1,4 +1,4 @@
-export const TRACK_RULES_VERSION = 2;
+export const TRACK_RULES_VERSION = 3;
 
 export const courses = [
   { id: 'garage', name: 'Garage Run', difficulty: 'FÁCIL', description: 'Una vuelta con curvas amplias, un loop y un primer salto hacia la derecha.', loops: 1, radius: 5.8, span: 21, straight: 76, width: 6.8, target: 31, color: '#f58220', theme: 'garage', jump: { gap: 8, side: 1, landingWidth: .54 } },

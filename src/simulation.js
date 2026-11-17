@@ -12,7 +12,7 @@ export function createRun(track, assistId = 'balanced', vehicleStats = {}) {
     elapsed: 0, nitro: 1, offset: 0, lateral: 0, boost: false,
     railTime: 0, scrapeCooldown: 0, stallTime: 0, message: '', event: null,
     progress: 0, crashAge: 0, collisions: 0, loopsPassed: 0,
-    flight: null,
+    flight: null, impactPending: false, stun: 0,
   };
 }
 
@@ -74,14 +74,22 @@ export function stepRun(run, input, dt = STEP) {
     return;
   }
   const frame = run.track.sample(run.distance);
+  if (run.impactPending) {
+    run.impactPending = false;
+    run.stun = .82;
+    const onLoop = frame.up.y < .65 || Math.abs(frame.forward.y) > .54;
+    run.speed *= onLoop ? .84 : .56;
+  }
+  const stunned = run.stun > 0;
+  run.stun = Math.max(0, run.stun - dt);
   const section = sectionAt(run.track, run.distance);
   const surface = surfaceAt(run.track, run.distance, section);
   run.scrapeCooldown = Math.max(0, run.scrapeCooldown - dt);
   if (run.scrapeCooldown===0 && run.message==='ROCE CON EL BORDE') run.message='';
-  const throttle = input.throttle ? 1 : 0;
+  const throttle = input.throttle ? (stunned ? .45 : 1) : 0;
   const brake = input.brake ? 1 : 0;
   const wasBoost = run.boost;
-  run.boost = !!(input.nitro && throttle && run.nitro > (wasBoost ? .002 : .12) && !brake);
+  run.boost = !!(input.nitro && throttle && !stunned && run.nitro > (wasBoost ? .002 : .12) && !brake);
   if (run.boost && !wasBoost) run.event = 'boost';
   run.nitro = Math.max(0, Math.min(1, run.nitro + (run.boost ? -.20/vehicle.nitroEfficiency : .055*vehicle.nitroEfficiency) * dt));
   let acceleration = throttle * 17*vehicle.acceleration - brake * 29*vehicle.braking - 1.0 - run.speed * .11 - run.speed * run.speed * .009;
@@ -97,7 +105,7 @@ export function stepRun(run, input, dt = STEP) {
   const centrifugal = -frame.curvature * run.speed * run.speed * .058/vehicle.grip;
   const steering = steer * Math.min(4.5, run.speed * .15)*vehicle.grip;
   let desiredLateral = steering + centrifugal;
-  if (run.assistId === 'full' && surface.rails) desiredLateral = steering * .55 - run.offset * 3.0 + centrifugal * .08;
+  if (run.assistId === 'full' && surface.rails) desiredLateral = (steer ? steering : -run.offset * 3.0) + centrifugal * .08;
   run.lateral += (desiredLateral - run.lateral) * Math.min(1, dt * 8);
   run.offset += run.lateral * dt;
   const edge = run.track.course.width / 2 - .92;

@@ -15,6 +15,8 @@ import { createVehicleRecordStore } from './vehicle-records.js';
 import { createRoomClient, roomCodePattern } from './online-client.js';
 import { createOnlineCars } from './online-cars.js';
 import { createOnlineUI } from './online-ui.js';
+import { createItemVisuals } from './item-visuals.js';
+import { ITEM_TYPES } from './race-items.js';
 import './style.css';
 
 const mount=document.querySelector('#game');
@@ -62,6 +64,7 @@ const keys=new Set(),touch=new Set();
 const input={throttle:false,brake:false,steerLeft:false,steerRight:false,nitro:false};
 const view={mode,courseId:selected.id,assistId,records,speed:0,elapsed:0,nitro:1,progress:0,countdown:3,message:'',muted,result:null};
 const onlineCars = createOnlineCars(scene);
+const itemVisuals = createItemVisuals(scene);
 let onlineRace = null;
 let lastOnlineRaceId;
 let soloSelection;
@@ -117,7 +120,7 @@ function openBuilder(){
 const ui=createUI({courses,assists,
   onCourse(id){if(mode==='menu'){loadCourse(courses.find(c=>c.id===id)||selected);syncUI();}},
   onAssist(id){if(mode==='menu'&&assists.some(a=>a.id===id)){assistId=id;view.assistId=id;run.assistId=id;syncUI();}},
-  onStart:()=>start(),onPause:pause,onResume:resume,onRetry:()=>start(),onMenu:menu,onBuild:openBuilder,onGarage:openGarage,onOnline:openOnline,onLeaveOnline:leaveOnline,
+  onStart:()=>start(),onPause:pause,onResume:resume,onRetry:()=>start(),onMenu:menu,onBuild:openBuilder,onGarage:openGarage,onOnline:openOnline,onLeaveOnline:leaveOnline,onItem:useHeldItem,
   onMute(){muted=!muted;view.muted=muted;audio.unlock();audio.mute(muted);syncUI();},
   onCamera(){cameraMode=1-cameraMode;},
   onTouch(action,pressed){if(pressed){touch.add(action);audio.unlock();}else touch.delete(action);},
@@ -142,9 +145,7 @@ const garage=createGarage({
   onExit(configuration){activateVehicle(configuration);showMenu();},
   onView(value){garageView=value;fitGarageCamera();},
 });
-const roomClient = createRoomClient(handleRoomState, message => {
-  if (onlineRace?.raceId === message.raceId) onlineCars.ingest(message);
-});
+const roomClient = createRoomClient(handleRoomState, handleRaceMessage);
 roomState = roomClient.state;
 const onlineUI = createOnlineUI({
   courses, assists,
@@ -188,6 +189,7 @@ function showOnlineRoom() {
   clearInput();
   audio.update(0, false, false);
   onlineCars.clear();
+  itemVisuals.clear();
   onlineRace = null;
   resize();
   syncUI();
@@ -199,6 +201,7 @@ function leaveOnline() {
   onlineRace = null;
   lastOnlineRaceId = undefined;
   onlineCars.clear();
+  itemVisuals.clear();
   roomClient.leave();
   if (soloSelection) {
     assistId = soloSelection.assistId;
@@ -220,10 +223,14 @@ function handleRoomState(next) {
     if (player?.status === 'racing' && lastOnlineRaceId !== room.raceId) {
       const course = courses.find(item => item.id === room.courseId);
       if (!course) return;
-      onlineRace = { raceId: room.raceId, startAt: room.startAt, sentAt: -Infinity };
+      onlineRace = { raceId: room.raceId, startAt: room.startAt, sentAt: -Infinity, pendingItemUntil: 0 };
       lastOnlineRaceId = room.raceId;
       assistId = room.assistId;
       loadCourse(course);
+      if (room.itemsEnabled) {
+        onlineRace.combat = { held: null, spent: {}, hazards: [], shields: {} };
+        itemVisuals.start(track);
+      }
       onlineCars.sync(room.players, next.selfId, track);
       start(room);
     } else if (onlineRace) {
@@ -240,10 +247,58 @@ function handleRoomState(next) {
   updateOnlineUI();
 }
 
+function itemNotice(text, effect) {
+  onlineRace.itemNotice = text;
+  onlineRace.itemNoticeUntil = performance.now() + 2300;
+  if (effect) audio.event(effect);
+}
+
+function handleRaceMessage(message) {
+  if (onlineRace?.raceId !== message.raceId || onlineRace.completion) return;
+  if (message.type === 'tick') { onlineCars.ingest(message); return; }
+  if (!onlineRace.combat) return;
+  if (message.type === 'item-error') {
+    onlineRace.pendingItemUntil = 0;
+    itemNotice(message.message);
+    return;
+  }
+  const selfId = roomState.selfId;
+  if (message.held?.token !== onlineRace.combat.held?.token) onlineRace.pendingItemUntil = 0;
+  onlineRace.combat = message;
+  for (const event of message.events) {
+    const item = ITEM_TYPES[event.item];
+    if (event.playerId === selfId) {
+      if (event.kind === 'pickup') itemNotice(`${item.name} disponible`, 'item-pickup');
+      else if (event.kind === 'used') itemNotice(event.item === 'shield' ? 'Escudo activo' : `${item.name} en pista`, 'item-use');
+      else if (event.kind === 'blocked') itemNotice('El escudo bloqueó el impacto', 'item-use');
+      else if (event.kind === 'hit' && mode === 'racing') {
+        const attacker = roomState.room.players.find(player => player.id === event.sourceId)?.name;
+        run.impactPending = true;
+        quake = .38;
+        itemNotice(attacker ? `Impacto de ${attacker}` : 'Recibiste un impacto', 'item-hit');
+      }
+    } else if (event.sourceId === selfId) {
+      const target = roomState.room.players.find(player => player.id === event.playerId)?.name;
+      itemNotice(event.kind === 'blocked' ? 'El rival bloqueó el ataque' : `Impacto en ${target ?? 'un rival'}`, 'item-use');
+    }
+  }
+}
+
+function canUseHeldItem() {
+  const held = onlineRace?.combat?.held;
+  return Boolean(mode === 'racing' && held && (!run.flight || held.kind === 'shield') && performance.now() >= onlineRace.pendingItemUntil);
+}
+
+function useHeldItem() {
+  if (!canUseHeldItem()) return;
+  const { raceId, combat } = onlineRace;
+  if (roomClient.send({ type: 'use-item', raceId, token: combat.held.token })) onlineRace.pendingItemUntil = performance.now() + 500;
+}
+
 function sendPosition() {
   if (!onlineRace) return;
   const pose = surfacePose(track, track.sample(run.distance), run.distance, run.speed, run.flight);
-  roomClient.send({ type: 'tick', raceId: onlineRace.raceId, distance: run.distance, offset: run.offset, speed: run.speed, boost: run.boost, ...pose });
+  roomClient.send({ type: 'tick', raceId: onlineRace.raceId, distance: run.distance, offset: run.offset, speed: run.speed, boost: run.boost, airborne: !!run.flight, ...pose });
 }
 
 function sendOnlineResult() {
@@ -257,6 +312,7 @@ function reportOnlineResult(type) {
   sendOnlineResult();
   mode = 'online';
   onlineCars.clear();
+  itemVisuals.clear();
   updateOnlineUI();
 }
 activateVehicle(garage.getConfiguration());
@@ -328,6 +384,7 @@ addEventListener('keydown',e=>{
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space','Enter'].includes(e.code))e.preventDefault();
   keys.add(e.code);
   if(e.repeat)return;
+  if(e.code==='KeyE')useHeldItem();
   if(e.code==='Escape'){if(mode==='paused')resume();else pause();}
   if(e.code==='KeyR'&&mode!=='menu'&&!onlineRace)start();
   if(e.code==='KeyC')cameraMode=1-cameraMode;
@@ -398,6 +455,13 @@ function syncUI(){
   if(mode==='racing'&&!view.message)view.message=trackHint();
   if (room && mode === 'racing') view.elapsed = Math.max(0, (roomClient.now() - room.startAt) / 1000);
   view.online = room ? { code: room.code, total: room.players.length, position: onlineCars.racePosition(run.distance, room.players, roomState.selfId) } : null;
+  const combat = onlineRace?.combat;
+  view.items = combat && !onlineRace.completion ? {
+    kind: combat.held?.kind,
+    usable: canUseHeldItem(),
+    shielded: combat.shields[roomState.selfId] > roomClient.now(),
+    notice: performance.now() < onlineRace.itemNoticeUntil ? onlineRace.itemNotice : '',
+  } : null;
   ui.update(view);
 }
 function drawMinimap(){
@@ -456,7 +520,9 @@ function frame(now){
       sendPosition();
       onlineRace.sentAt = now;
     }
-    onlineCars.update(dt, run.distance, run.offset);
+    const serverNow = roomClient.now();
+    onlineCars.update(dt, run.distance, run.offset, onlineRace.combat?.shields, serverNow);
+    itemVisuals.update(onlineRace.completion ? null : onlineRace.combat, serverNow, car.root, roomState.selfId);
   }
   if(mode==='crashed'&&!freeze){run.crashAge+=dt;car.root.position.y-=Math.min(9,run.crashAge*6)*dt;car.root.rotateZ(dt*2);}
   car.update(mode==='racing'&&!freeze?run.speed:0,run.boost&&mode==='racing',elapsed,dt);
@@ -474,6 +540,7 @@ function frame(now){
     window.__THREE_GAME_DIAGNOSTICS__={
       frame:frameCount,mode,course:selected.id,assist:assistId,score:run.progress,complete:mode==='finished',failed:mode==='crashed',
       distance:run.distance,speed:run.speed,nitro:run.nitro,offset:run.offset,elapsed:run.elapsed,
+      stun:run.stun,
       airborne:!!run.flight,lateral:run.lateral,sections:track.sections,
       player:{x:car.root.position.x,y:car.root.position.y,z:car.root.position.z},
       renderer:{calls:renderer.info.render.calls,triangles:renderer.info.render.triangles,geometries:renderer.info.memory.geometries,textures:renderer.info.memory.textures},
@@ -483,6 +550,7 @@ function frame(now){
         wheelRotation:car.wheels?.[0]?.rotation.x,boostVisible:car.flames?.visible??false},
       ...(mode==='garage'?{garage:{...garage.snapshot(),viewport:editorRect,camera:camera.position.toArray()}}:{}),
       online: { code: roomState.room?.code, phase: roomState.room?.phase, selfId: roomState.selfId, players: roomState.room?.players, startAt: onlineRace?.startAt, opponents: onlineCars.visibleCount, opponentLift: onlineCars.maxVisibleLift },
+      items: { held: onlineRace?.combat?.held?.kind, boxes: itemVisuals.visibleBoxes, hazards: itemVisuals.visibleHazards, notice: onlineRace?.itemNotice },
     };
   }
 }

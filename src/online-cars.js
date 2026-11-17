@@ -67,9 +67,9 @@ export function createOnlineCars(scene) {
       peer.speed = message.speed;
       peer.car.root.visible = true;
     },
-    update(dt, localDistance, localOffset) {
+    update(dt, localDistance, localOffset, shields, serverNow) {
       const now = performance.now();
-      for (const peer of peers.values()) {
+      for (const [id, peer] of peers) {
         if (!peer.at) continue;
         const prediction = Math.min((now - peer.at) / 1000, .2) * peer.speed;
         const blend = 1 - Math.exp(-dt * 14);
@@ -82,6 +82,8 @@ export function createOnlineCars(scene) {
         peer.car.root.position.y += peer.lift;
         peer.car.root.quaternion.copy(frame.q);
         peer.car.root.rotateX(-peer.pitch);
+        if (shields?.[id] > serverNow) peer.car.root.children[0].material.emissive.setHex(0x215c65);
+        else peer.car.root.children[0].material.emissive.setHex(0);
         // Coincident cars would obscure the driver's car and flicker.
         peer.car.root.visible = Math.abs(peer.distance - localDistance) > 3.7 || Math.abs(peer.offset - localOffset) > 2;
       }

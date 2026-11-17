@@ -26,6 +26,7 @@ export function createTrackData(course) {
     straight(13);
   }
   straight(course.straight - 28 - course.loops * 20.5);
+  const firstTurn = points.length;
   for (let i = 0; i < 150; i++) {
     const a = i / 150 * Math.PI;
     add(x + course.span * (1 - Math.cos(a)), floor, z + course.span * Math.sin(a));
@@ -41,7 +42,10 @@ export function createTrackData(course) {
   const track = createTrackFromPoints(points, course);
   if (course.jump) {
     const { gap, side, landingWidth } = course.jump;
-    track.sections.push(jumpSection(track, track.distanceAtPoint(returnStart) + 11, gap, side, landingWidth));
+    const returnDistance = track.distanceAtPoint(returnStart);
+    const jump = jumpSection(track, returnDistance + 11, gap, side, landingWidth);
+    track.sections.push(jump);
+    track.itemRows = [19, track.distanceAtPoint(firstTurn) - 14, returnDistance + 4, jump.end + 10];
   }
   if (course.openCurve) {
     const turnStart = track.distanceAtPoint(lastTurn);

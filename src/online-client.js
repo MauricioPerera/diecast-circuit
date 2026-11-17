@@ -6,7 +6,7 @@ const endpoint = import.meta.env.VITE_ROOM_SERVER?.trim() || (
 
 export const roomCodePattern = /^[A-HJ-NP-Z2-9]{6}$/;
 
-export function createRoomClient(onChange, onTick) {
+export function createRoomClient(onChange, onRaceMessage) {
   let socket;
   let pingTimer;
   let deadline;
@@ -92,8 +92,8 @@ export function createRoomClient(onChange, onTick) {
         state.room = message.room;
         state.error = '';
         emit();
-      } else if (message.type === 'tick') {
-        onTick(message);
+      } else if (['tick', 'combat', 'item-error'].includes(message.type)) {
+        onRaceMessage(message);
       } else if (message.type === 'error') {
         if (message.fatal || !hasWelcome) fail(message.message);
         else { state.error = message.message; emit(); }

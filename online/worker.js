@@ -2,6 +2,8 @@ import { DurableObject } from 'cloudflare:workers';
 import { assists, courses, TRACK_RULES_VERSION } from '../src/courses.js';
 import { createTrackData } from '../src/track.js';
 import { normalizeConfiguration } from '../src/vehicles.js';
+import { itemBoxes } from '../src/race-items.js';
+import { advanceCombat, combatSnapshot, createCombat, useRaceItem } from './race-combat.js';
 
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const CODE_PATTERN = /^[A-HJ-NP-Z2-9]{6}$/;
@@ -15,16 +17,18 @@ const TICK_SPACING_MS = 65;
 // The fastest current vehicle reaches 50.6 track units/s with nitro.
 const MAX_SPEED = 54;
 const FINISH_TOLERANCE = 12;
+const CLASSIC_TRACK_RULES = 2;
 const COURSE_BY_ID = new Map(courses.map(course => [course.id, course]));
 const ASSIST_IDS = new Set(assists.map(assist => assist.id));
-const FINISH_LINES = new Map();
+const COURSE_DATA = new Map();
 const textEncoder = new TextEncoder();
 
-function finishLine(courseId) {
-  if (!FINISH_LINES.has(courseId)) {
-    FINISH_LINES.set(courseId, createTrackData(COURSE_BY_ID.get(courseId)).length + 2);
+function raceCourse(courseId) {
+  if (!COURSE_DATA.has(courseId)) {
+    const track = createTrackData(COURSE_BY_ID.get(courseId));
+    COURSE_DATA.set(courseId, { track, boxes: itemBoxes(track) });
   }
-  return FINISH_LINES.get(courseId);
+  return COURSE_DATA.get(courseId);
 }
 
 function inviteCode() {
@@ -38,8 +42,8 @@ function cleanName(input) {
     .slice(0, 24).join('');
 }
 
-function publicRoom({ code, hostId, phase, courseId, assistId, startAt, raceId, players }) {
-  return { code, hostId, phase, courseId, assistId, startAt, raceId, players };
+function publicRoom({ code, hostId, phase, courseId, assistId, startAt, raceId, players, itemsEnabled }) {
+  return { code, hostId, phase, courseId, assistId, startAt, raceId, players, itemsEnabled };
 }
 
 function send(socket, message) {
@@ -208,7 +212,13 @@ export class RaceRoom extends DurableObject {
       fail(socket, 'Envía tu apodo para entrar a la sala.', true);
       return;
     }
-    if (message.trackRules !== TRACK_RULES_VERSION) {
+    const version = message.trackRules;
+    const roomVersion = this.room?.trackRules ?? CLASSIC_TRACK_RULES;
+    if (version === TRACK_RULES_VERSION && this.room?.hostId && roomVersion === CLASSIC_TRACK_RULES) {
+      fail(socket, 'El anfitrión debe recargar el juego y crear una sala nueva.', true);
+      return;
+    }
+    if ((version !== TRACK_RULES_VERSION && version !== CLASSIC_TRACK_RULES) || (this.room?.hostId && version !== roomVersion)) {
       fail(socket, 'Hay una actualización de pista. Recarga el juego para entrar.', true);
       return;
     }
@@ -230,18 +240,22 @@ export class RaceRoom extends DurableObject {
       return;
     }
     const host = !this.room.hostId && this.room.creatorId === connection.id;
-    if (host) this.room.hostId = connection.id;
+    if (host) {
+      this.room.hostId = connection.id;
+      this.room.trackRules = version;
+      this.room.itemsEnabled = version === TRACK_RULES_VERSION;
+    }
     this.room.players.push({
       id: connection.id, name, vehicle: normalizeConfiguration(message.vehicle),
       ready: host, status: 'waiting', time: null, connected: true,
     });
     connection.joined = true;
-    connection.trackRules = TRACK_RULES_VERSION;
+    connection.trackRules = version;
     this.#keepConnection(socket, connection);
     this.room.expiresAt = now + IDLE_MS;
     this.#persist();
     const room = publicRoom(this.room);
-    send(socket, { type: 'welcome', id: connection.id, serverNow: now, room, trackRules: TRACK_RULES_VERSION });
+    send(socket, { type: 'welcome', id: connection.id, serverNow: now, room, trackRules: version });
     this.#broadcast({ type: 'room', room, serverNow: now }, socket);
     await this.#schedule();
   }
@@ -257,6 +271,28 @@ export class RaceRoom extends DurableObject {
 
   #active(player, message) {
     return this.room.phase === 'race' && this.room.raceId === message.raceId && player.status === 'racing';
+  }
+
+  #combatUpdate(events, now) {
+    if (!events.length) return;
+    this.#persist();
+    for (const socket of this.ctx.getWebSockets()) {
+      const connection = this.#connection(socket);
+      if (!connection?.joined) continue;
+      send(socket, {
+        type: 'combat', raceId: this.room.raceId, events,
+        ...combatSnapshot(this.room.combat, connection.id, now),
+      });
+    }
+  }
+
+  #useItem(socket, connection, player, message, now) {
+    const combat = this.room.combat;
+    if (!combat || !this.#active(player, message) || now < this.room.startAt || now >= this.room.raceDeadline) return;
+    const tick = connection.tick?.raceId === this.room.raceId ? connection.tick : null;
+    const result = useRaceItem(combat, player.id, message.token, tick, raceCourse(this.room.courseId).track, now);
+    if (result.error) send(socket, { type: 'item-error', raceId: this.room.raceId, message: result.error });
+    if (result.event) this.#combatUpdate([result.event], now);
   }
 
   #tick(socket, connection, player, message, now) {
@@ -276,7 +312,16 @@ export class RaceRoom extends DurableObject {
       distance > previousDistance + MAX_SPEED * sincePrevious + 10
     ) return;
 
-    connection.tick = { raceId: this.room.raceId, distance, at: now };
+    const combat = this.room.combat;
+    if (combat) {
+      const { track, boxes } = raceCourse(this.room.courseId);
+      const airborne = message.airborne === true && lift >= -.05 && track.sections.some(section =>
+        section.kind === 'jump' && distance >= section.launch && distance < section.end + 12);
+      connection.tick = { raceId: this.room.raceId, distance, offset, speed, airborne, at: now };
+      this.#combatUpdate(advanceCombat(combat, player.id, previous, connection.tick, boxes), now);
+    } else {
+      connection.tick = { raceId: this.room.raceId, distance, at: now };
+    }
     this.#keepConnection(socket, connection);
     this.#broadcast({
       type: 'tick', id: player.id, raceId: this.room.raceId,
@@ -287,6 +332,7 @@ export class RaceRoom extends DurableObject {
   #completeRound() {
     if (this.room.phase === 'race' && this.room.players.every(player => player.status !== 'racing')) {
       this.room.phase = 'results';
+      delete this.room.combat;
     }
   }
 
@@ -330,12 +376,15 @@ export class RaceRoom extends DurableObject {
       }
       case 'settings': {
         if (!host || !lobby) return;
+        if (message.itemsEnabled !== undefined && typeof message.itemsEnabled !== 'boolean') return;
         const courseId = message.courseId ?? this.room.courseId;
         const assistId = message.assistId ?? this.room.assistId;
+        const itemsEnabled = this.room.trackRules === TRACK_RULES_VERSION && (message.itemsEnabled ?? this.room.itemsEnabled) === true;
         if (!COURSE_BY_ID.has(courseId) || !ASSIST_IDS.has(assistId)) return;
-        if (courseId === this.room.courseId && assistId === this.room.assistId) return;
+        if (courseId === this.room.courseId && assistId === this.room.assistId && itemsEnabled === (this.room.itemsEnabled === true)) return;
         this.room.courseId = courseId;
         this.room.assistId = assistId;
+        this.room.itemsEnabled = itemsEnabled;
         for (const entry of this.room.players) entry.ready = entry.id === this.room.hostId;
         break;
       }
@@ -349,7 +398,8 @@ export class RaceRoom extends DurableObject {
         this.room.raceId = crypto.randomUUID();
         this.room.startAt = now + START_DELAY_MS;
         this.room.raceDeadline = this.room.startAt + RACE_LIMIT_MS;
-        this.room.finishLine = finishLine(this.room.courseId);
+        this.room.finishLine = raceCourse(this.room.courseId).track.length + 2;
+        if (this.room.itemsEnabled) this.room.combat = createCombat(this.room.players);
         for (const entry of this.room.players) entry.status = 'racing';
         // Do not keep a seat for a guest whose identification wasn't completed.
         for (const pending of this.ctx.getWebSockets()) {
@@ -401,7 +451,7 @@ export class RaceRoom extends DurableObject {
       await this.#hello(socket, connection, message, now);
       return;
     }
-    if (connection.trackRules !== TRACK_RULES_VERSION) {
+    if (this.room && connection.trackRules !== (this.room.trackRules ?? CLASSIC_TRACK_RULES)) {
       fail(socket, 'Hay una actualización de pista. Recarga el juego para entrar.', true);
       return;
     }
@@ -415,6 +465,8 @@ export class RaceRoom extends DurableObject {
         send(socket, { type: 'pong', stamp: message.stamp, serverNow: now });
       } else if (message.type === 'finish') {
         await this.#finish(socket, connection, player, message, now);
+      } else if (message.type === 'use-item') {
+        this.#useItem(socket, connection, player, message, now);
       } else {
         await this.#roomAction(socket, player, message, now);
       }
