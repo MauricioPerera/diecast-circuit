@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { mkdirSync,writeFileSync,existsSync,renameSync } from 'node:fs';
 import assert from 'node:assert/strict';
+import { driveHazards } from './drive-hazards.mjs';
 const require=createRequire(import.meta.url),{chromium}=require('playwright-core');
 const out='artifacts/builder-qa';mkdirSync(out,{recursive:true});
 const url=process.env.GAME_URL||'http://127.0.0.1:5189/';
@@ -16,7 +17,7 @@ try {
   const context=await browser.newContext({viewport:{width:1440,height:900},recordVideo:{dir:out,size:{width:960,height:600}}}),page=await context.newPage();watch(page);
   await page.goto(`${url}?qa=1`);await waitMode(page,'menu');assert.equal(await page.locator('[data-course]').count(),5);
   await page.locator('.builder-entry').click();await waitMode(page,'builder');await page.waitForTimeout(200);
-  assert.equal(await page.locator('.builder-palette-piece').count(),6);assert.ok((await state(page)).builder.validation.valid);
+  assert.equal(await page.locator('.builder-palette-piece').count(),8);assert.ok((await state(page)).builder.validation.valid);
   await capture(page,'desktop-workshop');check('workshop entry and valid editable example');
   await page.locator('#builder-name').fill('Circuito WASD');await page.locator('#builder-name').press('End');await page.keyboard.type(' RC');
   assert.equal((await state(page)).mode,'builder');assert.equal(await page.locator('#builder-name').inputValue(),'Circuito WASD RC');check('name typing cannot activate race shortcuts');
@@ -26,10 +27,10 @@ try {
   assert.notDeepEqual((await state(page)).builder.camera,oldCamera);
   await page.locator('[data-editor-action=view][data-view=top]').click();await capture(page,'desktop-plan');check('orbit preview and plan view');
   await page.locator('[data-editor-action=new]').click();
-  for(const piece of ['loop','right','right'])await page.locator(`[data-editor-action=add][data-piece=${piece}]`).click();
-  assert.equal((await state(page)).builder.draft.pieces.length,4);assert.ok(await page.locator('.builder-play').isDisabled());
-  await page.getByRole('button',{name:'Deshacer',exact:true}).click();assert.equal((await state(page)).builder.draft.pieces.length,3);
-  await page.getByRole('button',{name:'Rehacer',exact:true}).click();assert.equal((await state(page)).builder.draft.pieces.length,4);
+  for(const piece of ['loop','jump','open','right'])await page.locator(`[data-editor-action=add][data-piece=${piece}]`).click();
+  assert.equal((await state(page)).builder.draft.pieces.length,5);assert.ok(await page.locator('.builder-play').isDisabled());
+  await page.getByRole('button',{name:'Deshacer',exact:true}).click();assert.equal((await state(page)).builder.draft.pieces.length,4);
+  await page.getByRole('button',{name:'Rehacer',exact:true}).click();assert.equal((await state(page)).builder.draft.pieces.length,5);
   await page.locator('[data-editor-action=close]').click();await page.waitForFunction(()=>window.__THREE_GAME_DIAGNOSTICS__?.builder?.closed);
   assert.ok((await state(page)).builder.validation.valid,JSON.stringify((await state(page)).builder.validation));
   assert.ok(await page.locator('.builder-play').isEnabled());await capture(page,'desktop-created-track');check('add real pieces, undo/redo and close an open loop circuit');
@@ -39,8 +40,10 @@ try {
   await page.locator('.builder-play').click();await page.keyboard.down('KeyW');await waitMode(page,'racing');
   await page.waitForTimeout(1700);await capture(page,'custom-active-play');
   assert.equal(await page.locator('.hud-course-name').textContent(),'Mi pista probada');
-  await page.waitForFunction(()=>['finished','crashed'].includes(window.__THREE_GAME_DIAGNOSTICS__?.mode),{},{timeout:45000});await page.keyboard.up('KeyW');
-  const completed=await state(page);assert.equal(completed.mode,'finished');assert.equal(completed.score,1);
+  let jumped=false;
+  await driveHazards(page,state=>{ jumped ||= state.airborne; });await page.keyboard.up('KeyW');
+  assert.equal(jumped,true);
+  const completed=await state(page);assert.equal(completed.mode,'finished',`Stopped at ${completed.distance.toFixed(1)} m with offset ${completed.offset.toFixed(2)}: ${await page.locator('.modal-description').textContent()}`);assert.equal(completed.score,1);
   await page.waitForSelector('.race-modal-layer:not([hidden])');await capture(page,'custom-finished');
   assert.notEqual(await page.locator('.hud-best strong').textContent(),'—:——.———');
   const records=await page.evaluate(()=>JSON.parse(localStorage.getItem('diecast-circuit.records.v1')));
@@ -62,11 +65,11 @@ try {
   // Geometry edits must get a different record key, while renaming does not.
   const width=page.locator('#builder-width');await width.focus();await page.keyboard.press('ArrowRight');await page.waitForTimeout(100);
   const changed=(await state(page)).course;assert.notEqual(changed,courseId);
-  await page.locator('[data-editor-action=delete-saved]').click();assert.equal((await state(page)).builder.savedCount,1);assert.equal((await state(page)).builder.draft.pieces.length,4);
+  await page.locator('[data-editor-action=delete-saved]').click();assert.equal((await state(page)).builder.savedCount,1);assert.equal((await state(page)).builder.draft.pieces.length,5);
   check('geometry-specific records and deleting a saved entry keeps the current draft');
   await page.getByRole('button',{name:'Volver al menú',exact:true}).click();await waitMode(page,'menu');
   await page.locator('[data-course=garage]').click();await page.locator('.start-button').click();await page.keyboard.down('KeyW');
-  await page.waitForFunction(()=>window.__THREE_GAME_DIAGNOSTICS__?.mode==='finished',{},{timeout:35000});await page.keyboard.up('KeyW');check('authored Garage Run still completes');
+  await driveHazards(page);await waitMode(page,'finished');await page.keyboard.up('KeyW');check('authored Garage Run still completes');
   const phoneContext=await browser.newContext({viewport:{width:390,height:844},hasTouch:true,isMobile:true,deviceScaleFactor:1}),phone=await phoneContext.newPage();watch(phone);
   await phone.goto(`${url}?qa=1`);await waitMode(phone,'menu');await phone.locator('.builder-entry').scrollIntoViewIfNeeded();await phone.locator('.builder-entry').tap();await waitMode(phone,'builder');await phone.waitForTimeout(200);
   const viewport=(await state(phone)).builder.viewport;assert.ok(viewport.width===390&&viewport.height>150&&viewport.y>=60);

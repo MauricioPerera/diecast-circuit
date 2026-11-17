@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { assists, courses } from '../src/courses.js';
+import { assists, courses, TRACK_RULES_VERSION } from '../src/courses.js';
 import { createTrackData } from '../src/track.js';
 import { normalizeConfiguration } from '../src/vehicles.js';
 
@@ -208,6 +208,10 @@ export class RaceRoom extends DurableObject {
       fail(socket, 'Envía tu apodo para entrar a la sala.', true);
       return;
     }
+    if (message.trackRules !== TRACK_RULES_VERSION) {
+      fail(socket, 'Hay una actualización de pista. Recarga el juego para entrar.', true);
+      return;
+    }
     if (!this.room || this.room.phase !== 'lobby' || now >= connection.helloBy || now >= this.room.expiresAt) {
       fail(socket, 'La entrada a esta sala ya venció.', true);
       return;
@@ -232,11 +236,12 @@ export class RaceRoom extends DurableObject {
       ready: host, status: 'waiting', time: null, connected: true,
     });
     connection.joined = true;
+    connection.trackRules = TRACK_RULES_VERSION;
     this.#keepConnection(socket, connection);
     this.room.expiresAt = now + IDLE_MS;
     this.#persist();
     const room = publicRoom(this.room);
-    send(socket, { type: 'welcome', id: connection.id, serverNow: now, room });
+    send(socket, { type: 'welcome', id: connection.id, serverNow: now, room, trackRules: TRACK_RULES_VERSION });
     this.#broadcast({ type: 'room', room, serverNow: now }, socket);
     await this.#schedule();
   }
@@ -256,8 +261,9 @@ export class RaceRoom extends DurableObject {
 
   #tick(socket, connection, player, message, now) {
     if (!this.#active(player, message) || now < this.room.startAt || now >= this.room.raceDeadline) return;
-    const { distance, offset, speed } = message;
-    if (![distance, offset, speed].every(Number.isFinite) || distance < 4 || speed < 0 || speed > MAX_SPEED) return;
+    const { distance, offset, speed, lift, pitch } = message;
+    if (![distance, offset, speed, lift, pitch].every(Number.isFinite) || distance < 4 || speed < 0 || speed > MAX_SPEED) return;
+    if (Math.abs(lift) > 15 || Math.abs(pitch) > 1.6) return;
     const previous = connection.tick?.raceId === this.room.raceId ? connection.tick : null;
     if (previous && now - previous.at < TICK_SPACING_MS) return;
     const course = COURSE_BY_ID.get(this.room.courseId);
@@ -274,7 +280,7 @@ export class RaceRoom extends DurableObject {
     this.#keepConnection(socket, connection);
     this.#broadcast({
       type: 'tick', id: player.id, raceId: this.room.raceId,
-      distance, offset, speed, boost: message.boost === true,
+      distance, offset, speed, lift, pitch, boost: message.boost === true,
     }, socket);
   }
 
@@ -393,6 +399,10 @@ export class RaceRoom extends DurableObject {
     }
     if (!connection.joined) {
       await this.#hello(socket, connection, message, now);
+      return;
+    }
+    if (connection.trackRules !== TRACK_RULES_VERSION) {
+      fail(socket, 'Hay una actualización de pista. Recarga el juego para entrar.', true);
       return;
     }
     const player = this.room?.players.find(entry => entry.id === connection.id && entry.connected);

@@ -55,13 +55,15 @@ Abre el juego en dos ventanas del navegador e invita a la segunda. `npm run test
 | Pausa / continuar | Esc |
 | Reintentar | R |
 
-En móvil se muestran botones de dirección, gas, freno y nitro. La reserva de nitro se consume al mantenerlo y se recarga al soltarlo. Con asistencia **Completa**, mantén gas para aprender las pistas; **Equilibrada** frena automáticamente y deja la dirección en tus manos; **Manual** exige dirección y frenado. Roza un borde y pierdes velocidad. Insistir fuera del carril o perder el impulso boca abajo provoca un fallo. Completa una vuelta para guardar tu récord en este navegador.
+En móvil se muestran botones de dirección, gas, freno y nitro. La reserva de nitro se consume al mantenerlo y se recarga al soltarlo. La asistencia **Completa** centra el coche en los tramos con barandas. **Equilibrada** frena automáticamente y **Manual** te da todo el control.
+
+Las marcas amarillas señalan los bordes abiertos. Frena antes de esas curvas y corrige la dirección. En los saltos, el aviso del tablero indica el lado de la recepción y la velocidad mínima. Alinea el coche antes de despegar y usa nitro en la aproximación si te falta impulso. Una caída termina el intento. Completa una vuelta para guardar tu récord en este navegador.
 
 ## Construir tu propia pista
 
 En el menú, pulsa **Construir mi pista** para abrir el taller. Puedes partir del ejemplo o pulsar **Nueva** para empezar con una recta de salida.
 
-1. Selecciona una pieza del recorrido y añade rectas, curvas a izquierda/derecha, rampas o loops. Las piezas nuevas se insertan después de la seleccionada.
+1. Selecciona una pieza del recorrido y añade rectas, curvas, rampas, saltos, curvas abiertas o loops. Las piezas nuevas se insertan después de la seleccionada. Puedes ajustar el hueco del salto y el radio de la curva sin barandas.
 2. Ajusta la pieza con sus controles, cambia el ancho o reordena/quita piezas. **Deshacer** y **Rehacer** permiten experimentar. Arrastra la vista 3D para girar, usa la rueda para acercar o pulsa **Planta** para inspeccionar el recorrido.
 3. Pulsa **Cerrar circuito** para generar el tramo de regreso. Si hay cruces, falta de espacio o una salida demasiado corta, el taller explica qué corregir. **Probar pista** se habilita al validar una pista cerrada.
 4. Ponle un nombre y pulsa **Guardar**. La biblioteca conserva hasta 12 pistas en este navegador; puedes cargarlas, actualizarlas o borrarlas. El borrador también se conserva automáticamente.

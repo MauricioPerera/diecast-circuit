@@ -52,7 +52,7 @@ export function createOnlineCars(scene) {
         // Wait for the first position so opponents never spawn inside the local car.
         car.root.visible = false;
         scene.add(car.root);
-        peers.set(player.id, { car, distance: 4, target: 4, offset: 0, targetOffset: 0, speed: 0, at: 0, track });
+        peers.set(player.id, { car, distance: 4, target: 4, offset: 0, targetOffset: 0, lift: 0, targetLift: 0, pitch: 0, targetPitch: 0, speed: 0, at: 0, track });
       }
     },
     ingest(message) {
@@ -62,6 +62,8 @@ export function createOnlineCars(scene) {
       peer.at = performance.now();
       peer.target = message.distance;
       peer.targetOffset = message.offset;
+      peer.targetLift = message.lift;
+      peer.targetPitch = message.pitch;
       peer.speed = message.speed;
       peer.car.root.visible = true;
     },
@@ -70,11 +72,16 @@ export function createOnlineCars(scene) {
       for (const peer of peers.values()) {
         if (!peer.at) continue;
         const prediction = Math.min((now - peer.at) / 1000, .2) * peer.speed;
-        peer.distance += (peer.target + prediction - peer.distance) * (1 - Math.exp(-dt * 14));
-        peer.offset += (peer.targetOffset - peer.offset) * (1 - Math.exp(-dt * 14));
+        const blend = 1 - Math.exp(-dt * 14);
+        peer.distance += (peer.target + prediction - peer.distance) * blend;
+        peer.offset += (peer.targetOffset - peer.offset) * blend;
+        peer.lift += (peer.targetLift - peer.lift) * blend;
+        peer.pitch += (peer.targetPitch - peer.pitch) * blend;
         const frame = peer.track.sample(peer.distance);
         peer.car.root.position.copy(frame.p).addScaledVector(frame.right, peer.offset).addScaledVector(frame.up, .024);
+        peer.car.root.position.y += peer.lift;
         peer.car.root.quaternion.copy(frame.q);
+        peer.car.root.rotateX(-peer.pitch);
         // Coincident cars would obscure the driver's car and flicker.
         peer.car.root.visible = Math.abs(peer.distance - localDistance) > 3.7 || Math.abs(peer.offset - localOffset) > 2;
       }
@@ -93,5 +100,6 @@ export function createOnlineCars(scene) {
     },
     clear() { for (const id of peers.keys()) remove(id); },
     get visibleCount() { return [...peers.values()].filter(peer => peer.car.root.visible).length; },
+    get maxVisibleLift() { return Math.max(0, ...[...peers.values()].filter(peer => peer.car.root.visible).map(peer => peer.lift)); },
   };
 }

@@ -1,3 +1,5 @@
+import { TRACK_RULES_VERSION } from './courses.js';
+
 const endpoint = import.meta.env.VITE_ROOM_SERVER?.trim() || (
   ['127.0.0.1', 'localhost'].includes(location.hostname) ? 'http://127.0.0.1:8787' : ''
 );
@@ -64,13 +66,14 @@ export function createRoomClient(onChange, onTick) {
     deadline = setTimeout(() => fail('El servidor tardó demasiado en responder. Inténtalo de nuevo.'), 10000);
     connection.addEventListener('open', () => {
       if (connection !== socket) return;
-      send({ type: 'hello', name, vehicle });
+      send({ type: 'hello', name, vehicle, trackRules: TRACK_RULES_VERSION });
     });
     connection.addEventListener('message', ({ data }) => {
       if (connection !== socket || typeof data !== 'string') return;
       let message;
       try { message = JSON.parse(data); } catch { return; }
       if (message.type === 'welcome') {
+        if (message.trackRules !== TRACK_RULES_VERSION) return fail('Hay una actualización de pista. Recarga el juego para entrar.');
         clearTimeout(deadline);
         hasWelcome = true;
         clockOffset = message.serverNow - Date.now();

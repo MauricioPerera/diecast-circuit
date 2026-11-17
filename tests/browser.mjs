@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
+import { driveHazards } from './drive-hazards.mjs';
 const require=createRequire(import.meta.url);
 const {chromium}=require('playwright-core');
 const base=process.env.GAME_URL||'http://127.0.0.1:5189/';
@@ -37,7 +38,13 @@ try{
       await page.keyboard.up('KeyW');await page.keyboard.up('ShiftLeft');await page.keyboard.press('Escape');await page.waitForFunction(()=>window.__THREE_GAME_DIAGNOSTICS__.mode==='racing');
       await page.keyboard.down('KeyW');await page.keyboard.down('ShiftLeft');check('real throttle and nitro; pause freezes timer and movement');
     }
-    await page.waitForFunction(()=>['finished','crashed'].includes(window.__THREE_GAME_DIAGNOSTICS__?.mode),{},{timeout:40000});
+    let jumped=false,airborneCapture;
+    await driveHazards(page,state=>{
+      if(id==='garage'&&!airborneCapture&&state.airborne&&state.distance>state.sections[0].launch+5)airborneCapture=capture(page,'desktop-jump');
+      jumped ||= state.airborne;
+    });
+    await airborneCapture;
+    assert.equal(jumped,true,`${id} entered flight`);
     await page.keyboard.up('KeyW');await page.keyboard.up('ShiftLeft');
     const d=await inspect(page);assert.equal(d.mode,'finished',id);assert.ok(d.distance>before.distance+250);assert.equal(d.score,1);
     report.laps.push({course:id,time:d.elapsed,metrics:d.renderer,frames:d.frame});check(`real input completed ${id}`,{seconds:d.elapsed});
@@ -48,6 +55,12 @@ try{
   await page.reload();await page.waitForFunction(()=>window.__THREE_GAME_DIAGNOSTICS__?.frame>10);
   assert.ok((await page.locator('[data-course=district] .course-record').textContent()).includes(':'));assert.notEqual(await page.locator('[data-course=district] .course-record').textContent(),'—:——.———');
   await page.locator('[data-assist=manual]').click();assert.equal(await page.locator('[data-course=district] .course-record').textContent(),'—:——.———');check('records persist after reload and are separated by assist');
+  await page.locator('[data-course=garage]').click();await page.locator('[data-assist=full]').click();
+  await page.locator('.start-button').click();await page.keyboard.down('KeyW');
+  await page.waitForFunction(()=>window.__THREE_GAME_DIAGNOSTICS__?.mode==='crashed',{},{timeout:22000});await page.keyboard.up('KeyW');
+  await page.waitForSelector('.race-modal-layer:not([hidden])');assert.match(await page.locator('.modal-description').textContent(),/fuera de la recepción/);
+  await page.getByRole('button',{name:/ELEGIR CIRCUITO/}).click();await page.locator('[data-assist=manual]').click();
+  check('holding only W misses the landing even with full assistance');
   }else await page.locator('[data-assist=manual]').click();
   await page.locator('.start-button').click();await page.keyboard.down('KeyW');await page.keyboard.down('KeyD');
   await page.waitForFunction(()=>window.__THREE_GAME_DIAGNOSTICS__?.mode==='crashed',{},{timeout:12000});await page.keyboard.up('KeyW');await page.keyboard.up('KeyD');

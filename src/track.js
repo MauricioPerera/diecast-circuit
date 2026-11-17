@@ -1,4 +1,5 @@
 import * as T from 'three';
+import { jumpSection, openSection, sectionAt, surfaceAt } from './track-surface.js';
 
 export function createTrackData(course) {
   const points = [];
@@ -30,12 +31,23 @@ export function createTrackData(course) {
     add(x + course.span * (1 - Math.cos(a)), floor, z + course.span * Math.sin(a));
   }
   x += course.span * 2;
+  const returnStart = points.length;
   straight(course.straight, -1, course.theme === 'heights' ? 10 : course.theme === 'skyline' ? 13 : 3);
+  const lastTurn = points.length;
   for (let i = 0; i < 150; i++) {
     const a = i / 150 * Math.PI;
     add(x - course.span * (1 - Math.cos(a)), floor, z - course.span * Math.sin(a));
   }
-  return createTrackFromPoints(points, course);
+  const track = createTrackFromPoints(points, course);
+  if (course.jump) {
+    const { gap, side, landingWidth } = course.jump;
+    track.sections.push(jumpSection(track, track.distanceAtPoint(returnStart) + 11, gap, side, landingWidth));
+  }
+  if (course.openCurve) {
+    const turnStart = track.distanceAtPoint(lastTurn);
+    track.sections.push(openSection(turnStart - 4, turnStart + course.openCurve));
+  }
+  return track;
 }
 
 // Shared path contract for authored courses and the workshop. Open paths are
@@ -76,7 +88,13 @@ export function createTrackFromPoints(input, course, { closed = true } = {}) {
   }
   frames[n].curvature = frames[0].curvature;
   return {
-    course, curve, frames, length, closed,
+    course, curve, frames, length, closed, sections: [],
+    distanceAtPoint(index) {
+      const arc = curve.getLengths();
+      const t = index / (closed ? points.length : points.length - 1);
+      const i = t * (arc.length - 1), low = Math.floor(i);
+      return T.MathUtils.lerp(arc[low], arc[Math.min(arc.length - 1, low + 1)], i - low);
+    },
     sample(distance) {
       const d=closed?((distance%length+length)%length):T.MathUtils.clamp(distance,0,length);
       const f = d / length * n;
@@ -92,18 +110,41 @@ export function createTrackFromPoints(input, course, { closed = true } = {}) {
   };
 }
 
-function ribbon(data, left, right, height, material) {
+function deckStrips(data) {
+  const boundaries = [0, data.length];
+  for (const section of data.sections) {
+    boundaries.push(section.start, section.end);
+    if (section.kind === 'jump') boundaries.push(section.launch, section.land, section.merge);
+  }
+  const cuts = [...new Set(boundaries)].filter(s => s >= 0 && s <= data.length).sort((a, b) => a - b);
+  return cuts.slice(1).flatMap((end, i) => {
+    const start = cuts[i];
+    if (end - start < .0001) return [];
+    const section = sectionAt(data, (start + end) / 2);
+    const surface = surfaceAt(data, (start + end) / 2, section);
+    if (surface.gap) return [];
+    const count = Math.max(1, Math.ceil((end - start) / .32));
+    const rows = Array.from({ length: count + 1 }, (_, row) => {
+      const distance = T.MathUtils.lerp(start, end, row / count);
+      const frame = data.sample(distance);
+      const { half, center, rise } = surfaceAt(data, distance, section ?? null);
+      frame.p.y += rise;
+      return { ...frame, half, center, distance };
+    });
+    return [{ rows, rails: surface.rails }];
+  });
+}
+
+function ribbon(strips, sides, height, material) {
   const vertices = [], indices = [], uv = [];
-  data.frames.forEach((f, i) => {
-    for (const side of [left, right]) {
-      const p = f.p.clone().addScaledVector(f.right, side).addScaledVector(f.up, height);
+  for (const { rows } of strips) rows.forEach((f, i) => {
+    const k = vertices.length / 3;
+    for (const side of sides(f.half)) {
+      const p = f.p.clone().addScaledVector(f.right, f.center + side).addScaledVector(f.up, height);
       vertices.push(p.x, p.y, p.z);
-      uv.push(side, i * data.length / (data.frames.length - 1) / 9);
+      uv.push(side, f.distance / 9);
     }
-    if (i) {
-      const k = i * 2;
-      indices.push(k - 2, k - 1, k, k - 1, k + 1, k);
-    }
+    if (i) indices.push(k - 2, k, k - 1, k - 1, k, k + 1);
   });
   const geometry = new T.BufferGeometry();
   geometry.setAttribute('position', new T.Float32BufferAttribute(vertices, 3));
@@ -118,25 +159,37 @@ function ribbon(data, left, right, height, material) {
 export function buildTrack(data, materials) {
   const group = new T.Group();
   const half = data.course.width / 2;
-  group.add(ribbon(data, -half, half, 0, materials.road));
+  const strips = deckStrips(data);
+  const protectedStrips = strips.filter(strip => strip.rails);
+  const exposedStrips = strips.filter(strip => !strip.rails);
+  group.add(ribbon(strips, h => [-h, h], 0, materials.road));
   for (const side of [-1, 1]) {
-    group.add(ribbon(data, side * (half - .12), side * half, .2, materials.rail));
-    const points = data.frames.filter((_, i) => i % 3 === 0).map(f => f.p.clone().addScaledVector(f.right, side * half).addScaledVector(f.up, .29));
-    if(data.closed!==false)points.push(points[0]);
-    group.add(new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(points,false,'centripetal'), Math.max(4,Math.ceil(data.length * 1.4)), .12, 5, data.closed!==false), materials.rail));
-    group.add(ribbon(data, side * (half - .36), side * (half - .25), .022, materials.lane));
+    const edgeBand = (inner, outer) => h => side === 1 ? [h - inner, h - outer] : [-h + outer, -h + inner];
+    if (protectedStrips.length) group.add(ribbon(protectedStrips, edgeBand(.12, 0), .2, materials.rail));
+    for (const { rows } of protectedStrips) {
+      const points = rows.filter((_, i) => i % 3 === 0 || i === rows.length - 1)
+        .map(f => f.p.clone().addScaledVector(f.right, side * half).addScaledVector(f.up, .29));
+      group.add(new T.Mesh(new T.TubeGeometry(new T.CatmullRomCurve3(points, false, 'centripetal'),
+        Math.max(4, Math.ceil((rows.at(-1).distance - rows[0].distance) * 1.4)), .12, 5, false), materials.rail));
+    }
+    group.add(ribbon(strips, edgeBand(.36, .25), .022, materials.lane));
+    if (exposedStrips.length) group.add(ribbon(exposedStrips, edgeBand(.16, .04), .026, materials.warning));
   }
-  group.add(ribbon(data, -.035, .035, .018, materials.center));
+  group.add(ribbon(strips, () => [-.035, .035], .018, materials.center));
   const count = Math.floor(data.length / 9);
   const beams = new T.InstancedMesh(new T.BoxGeometry(.32, 1, .32), materials.support, count * 2);
   const feet = new T.InstancedMesh(new T.BoxGeometry(1.5, .18, 1.1), materials.support, count * 2);
   const m = new T.Matrix4(), q = new T.Quaternion(), s = new T.Vector3(), p = new T.Vector3();
   let index = 0;
   for (let i = 0; i < count; i++) {
-    const f = data.sample(i * data.length / count);
+    const distance = i * data.length / count;
+    const surface = surfaceAt(data, distance);
+    if (surface.gap) continue;
+    const f = data.sample(distance);
+    f.p.y += surface.rise;
     if (f.up.y < .7 || f.p.y < floorHeight()) continue;
     for (const side of [-1, 1]) {
-      p.copy(f.p).addScaledVector(f.right, side * (half - .4));
+      p.copy(f.p).addScaledVector(f.right, surface.center + side * (surface.half - .4));
       const height = p.y - .15;
       s.set(1, height, 1);
       const base = p.clone();
@@ -158,16 +211,50 @@ export function buildTrack(data, materials) {
   for(let i=3;i<data.frames.length-3;i++) {
     if(Math.abs(data.frames[i].curvature)>.022 && Math.abs(data.frames[i-1].curvature)<=.022) corners.push(i/(data.frames.length-1)*data.length-9);
   }
-  const markers = new T.InstancedMesh(markerGeo, materials.warning, Math.max(1,corners.length*7));
+  const markers = new T.InstancedMesh(markerGeo, materials.warning, Math.max(1,corners.length*7 + data.sections.length*6));
+  function addMarker(distance) {
+    const surface = surfaceAt(data, distance);
+    if (surface.gap) return;
+    const f = data.sample(distance);
+    f.p.y += surface.rise;
+    p.copy(f.p).addScaledVector(f.right, surface.center).addScaledVector(f.up, .04);
+    const rotation = f.q.multiply(q.setFromAxisAngle(new T.Vector3(1, 0, 0), -Math.atan(surface.grade))).multiply(floorQ);
+    markers.setMatrixAt(mark++, m.compose(p, rotation, s.set(surface.half / half, 1, 1)));
+  }
   for (const start of corners) {
-    for (let i = 0; i < 7; i++) {
-      const f = data.sample(start - i * 1.1);
-      p.copy(f.p).addScaledVector(f.up, .035);
-      markers.setMatrixAt(mark++, m.compose(p, f.q.clone().multiply(floorQ), new T.Vector3(1,1,1)));
+    for (let i = 0; i < 7; i++) addMarker(start - i * 1.1);
+  }
+  for (const section of data.sections) {
+    if (section.kind !== 'jump') continue;
+    for (const inset of [.45, 1.15, 1.85]) {
+      addMarker(section.launch - inset);
+      addMarker(section.land + inset);
     }
   }
   markers.count=mark;
   group.add(markers);
+  const jumps = data.sections.filter(section => section.kind === 'jump');
+  if (jumps.length) {
+    const arrow = new T.BufferGeometry();
+    arrow.setAttribute('position', new T.Float32BufferAttribute([
+      -.68, 0, -.48, 0, 0, .48, .68, 0, -.48,
+      .36, 0, -.48, 0, 0, .02, -.36, 0, -.48,
+    ], 3));
+    arrow.setIndex([0, 1, 5, 5, 1, 4, 4, 1, 2, 4, 2, 3]);
+    arrow.computeVertexNormals();
+    const arrows = new T.InstancedMesh(arrow, materials.support, jumps.length * 3);
+    let index = 0;
+    for (const section of jumps) for (const back of [5, 8, 11]) {
+      const distance = section.launch - back;
+      const frame = data.sample(distance);
+      const { rise, grade } = surfaceAt(data, distance);
+      p.copy(frame.p).addScaledVector(frame.right, section.landingOffset).addScaledVector(frame.up, .048);
+      p.y += rise;
+      frame.q.multiply(q.setFromAxisAngle(new T.Vector3(1, 0, 0), -Math.atan(grade)));
+      arrows.setMatrixAt(index++, m.compose(p, frame.q, s.set(1, 1, 1)));
+    }
+    group.add(arrows);
+  }
   return group;
 }
 

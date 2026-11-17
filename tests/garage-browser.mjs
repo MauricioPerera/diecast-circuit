@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { mkdirSync,writeFileSync,existsSync,renameSync } from 'node:fs';
 import assert from 'node:assert/strict';
+import { driveHazards } from './drive-hazards.mjs';
 import {configurationKey,DEFAULT_CONFIGURATION} from '../src/vehicles.js';
 const require=createRequire(import.meta.url),{chromium}=require('playwright-core');
 const out='artifacts/garage-qa';mkdirSync(out,{recursive:true});
@@ -59,7 +60,7 @@ try{
   assert.deepEqual((await state(page)).vehicle.parts,expected);await action(page,'apply').click();await waitMode(page,'menu');check('applied car and named library survive reload');
   await page.locator('[data-course=garage]').click();await page.locator('.start-button').click();await page.keyboard.down('KeyW');await page.keyboard.down('ShiftLeft');await waitMode(page,'racing');
   await page.waitForTimeout(1100);const moving=await state(page);assert.ok(moving.speed>13&&moving.nitro<1&&moving.vehicle.boostVisible);assert.notEqual(moving.vehicle.wheelRotation,0);assert.deepEqual(moving.vehicle.parts,expected);assert.equal(moving.vehicle.stats.grip,moving.vehicle.runStats.grip);await capture(page,'hybrid-racing');
-  await waitMode(page,'finished',35000);await page.keyboard.up('KeyW');await page.keyboard.up('ShiftLeft');const finished=await state(page);
+  await driveHazards(page);await waitMode(page,'finished');await page.keyboard.up('KeyW');await page.keyboard.up('ShiftLeft');const finished=await state(page);
   assert.equal(finished.score,1);assert.match(await page.locator('.hud-vehicle-name').textContent(),/Híbrido 07 RC/);
   const stored=await page.evaluate(()=>JSON.parse(localStorage.getItem('diecast-circuit.records.v2')));assert.ok(stored.profiles[key]['garage-full']>0);
   assert.equal(stored.profiles[configurationKey(DEFAULT_CONFIGURATION)]['garage-full'],undefined);await capture(page,'hybrid-finished');

@@ -1,6 +1,7 @@
 import * as T from 'three';
 import { courses, assists } from './courses.js';
 import { createTrackData, buildTrack } from './track.js';
+import { surfacePose } from './track-surface.js';
 import { createCar } from './car.js';
 import { makeMaterials, createWorld, createGantry } from './world.js';
 import { createRun, stepRun, STEP } from './simulation.js';
@@ -241,7 +242,8 @@ function handleRoomState(next) {
 
 function sendPosition() {
   if (!onlineRace) return;
-  roomClient.send({ type: 'tick', raceId: onlineRace.raceId, distance: run.distance, offset: run.offset, speed: run.speed, boost: run.boost });
+  const pose = surfacePose(track, track.sample(run.distance), run.distance, run.speed, run.flight);
+  roomClient.send({ type: 'tick', raceId: onlineRace.raceId, distance: run.distance, offset: run.offset, speed: run.speed, boost: run.boost, ...pose });
 }
 
 function sendOnlineResult() {
@@ -337,9 +339,14 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden){clearInput
 addEventListener('resize',()=>{resize();if(mode==='builder')fitBuilderCamera({preserveDirection:true});else if(mode==='garage')fitGarageCamera({preserveDirection:true});});
 
 const cameraPosition=new T.Vector3(),cameraTarget=new T.Vector3(),targetUp=new T.Vector3(0,1,0);
-function placeCar(f,offset){
+function placeCar(f,offset,onRun=false){
   car.root.position.copy(f.p).addScaledVector(f.right,offset).addScaledVector(f.up,.02);
   car.root.quaternion.copy(f.q);
+  if(onRun){
+    const { lift, pitch } = surfacePose(track, f, run.distance, run.speed, run.flight);
+    car.root.position.y += lift;
+    car.root.rotateX(-pitch);
+  }
   if(mode==='racing')car.root.rotateY(run.lateral*.025);
 }
 function updateCamera(dt,snap=false){
@@ -358,6 +365,9 @@ function updateCamera(dt,snap=false){
     const look=track.sample(run.distance+(far?11:7)*(1-Math.min(.97,bend*2)));
     cameraPosition.copy(trailing.p).addScaledVector(trailing.right,run.offset*.85).addScaledVector(trailing.up,far?5.6:3.6);
     cameraTarget.copy(look.p).addScaledVector(f.right,run.offset*.4).addScaledVector(f.up,.6);
+    const { lift } = surfacePose(track, f, run.distance, run.speed, run.flight);
+    cameraPosition.y += Math.max(0,lift)*.45;
+    cameraTarget.y += Math.max(0,lift)*.45;
     targetUp.copy(f.up).add(trailing.up).normalize();
   }
   const blend=snap?1:1-Math.exp(-dt*9);
@@ -372,10 +382,20 @@ function updateCamera(dt,snap=false){
 function finish(){
   result={time:run.elapsed,...recordStore.record(selected.id,assistId,run.elapsed,vehicleConfiguration)};view.result=result;
 }
+function trackHint(){
+  if(run.flight)return 'EN EL AIRE';
+  const ahead=track.sections.find(section=>run.distance>=section.start-30&&run.distance<(section.launch??section.end));
+  if(!ahead)return '';
+  if(ahead.kind==='open')return 'BORDE ABIERTO · FRENA Y CORRIGE';
+  const side=ahead.side===1?'DERECHA':'IZQUIERDA';
+  const speed=Math.ceil(ahead.minimumSpeed*3.6/5)*5;
+  return `SALTO A LA ${side} · ${speed} KM/H MÍN.`;
+}
 function syncUI(){
   document.querySelector('#game-ui').hidden=studioMode()||mode==='online';
   Object.assign(view,{mode,course:selected,vehicle:vehicleConfiguration,vehicleKey:configurationKey(vehicleConfiguration),assistId,courseId:selected.id,records,speed:run?.speed*3.6||0,elapsed:run?.elapsed||0,nitro:run?.nitro??1,progress:run?.progress||0,countdown:Math.max(1,Math.ceil(run?.countdown||0)),message:run?.message||'',muted,result});
   const room = onlineRace && roomState.room;
+  if(mode==='racing'&&!view.message)view.message=trackHint();
   if (room && mode === 'racing') view.elapsed = Math.max(0, (roomClient.now() - room.startAt) / 1000);
   view.online = room ? { code: room.code, total: room.players.length, position: onlineCars.racePosition(run.distance, room.players, roomState.selfId) } : null;
   ui.update(view);
@@ -423,12 +443,12 @@ function frame(now){
       if(!onlineRace && run.mode==='countdown'){
         const count=Math.ceil(run.countdown);if(count!==lastCountdown){lastCountdown=count;audio.event('tick');}
       }
-      if(run.event){audio.event(run.event);if(run.event==='scrape')quake=.13;}
+      if(run.event){audio.event(run.event);if(run.event==='scrape'||run.event==='land')quake=.13;}
       mode=run.mode;
       if(mode==='finished'){if(onlineRace)reportOnlineResult('finish');else finish();clearInput();break;}
       if(mode==='crashed'){if(onlineRace)reportOnlineResult('dnf');else result={reason:run.message};clearInput();quake=.3;break;}
     }
-    placeCar(track.sample(run.distance),run.offset);
+    placeCar(track.sample(run.distance),run.offset,true);
   }
   if (onlineRace) {
     if (onlineRace.completion && now-onlineRace.sentAt >= 500) sendOnlineResult();
@@ -454,6 +474,7 @@ function frame(now){
     window.__THREE_GAME_DIAGNOSTICS__={
       frame:frameCount,mode,course:selected.id,assist:assistId,score:run.progress,complete:mode==='finished',failed:mode==='crashed',
       distance:run.distance,speed:run.speed,nitro:run.nitro,offset:run.offset,elapsed:run.elapsed,
+      airborne:!!run.flight,lateral:run.lateral,sections:track.sections,
       player:{x:car.root.position.x,y:car.root.position.y,z:car.root.position.z},
       renderer:{calls:renderer.info.render.calls,triangles:renderer.info.render.triangles,geometries:renderer.info.memory.geometries,textures:renderer.info.memory.textures},
       physics:{engine:'custom track-relative',timestep:STEP,bodies:1,colliders:2,sensors:1},frameMs:frameDelta*1000,assetErrors,
@@ -461,7 +482,7 @@ function frame(now){
       vehicle:{key:configurationKey(vehicleConfiguration),configuration:vehicleConfiguration,stats:vehicleStats,runStats:run.vehicle,parts:car.root.userData.parts,
         wheelRotation:car.wheels?.[0]?.rotation.x,boostVisible:car.flames?.visible??false},
       ...(mode==='garage'?{garage:{...garage.snapshot(),viewport:editorRect,camera:camera.position.toArray()}}:{}),
-      online: { code: roomState.room?.code, phase: roomState.room?.phase, selfId: roomState.selfId, players: roomState.room?.players, startAt: onlineRace?.startAt, opponents: onlineCars.visibleCount },
+      online: { code: roomState.room?.code, phase: roomState.room?.phase, selfId: roomState.selfId, players: roomState.room?.players, startAt: onlineRace?.startAt, opponents: onlineCars.visibleCount, opponentLift: onlineCars.maxVisibleLift },
     };
   }
 }

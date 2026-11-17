@@ -5,11 +5,19 @@ import { createVehicleRecordStore } from '../src/vehicle-records.js';
 import { courses } from '../src/courses.js';
 import { createTrackData } from '../src/track.js';
 import { createRun,stepRun } from '../src/simulation.js';
+import { hazardControls } from './drive-hazards.mjs';
 
 const makeStorage=(values={})=>{const data=new Map(Object.entries(values));return {getItem:key=>data.get(key)??null,setItem:(key,value)=>data.set(key,value)};};
-function lap(track,configuration,nitro=false){const run=createRun(track,'full',configuration?getVehicleStats(configuration):undefined);for(let i=0;i<120*70&&['countdown','racing'].includes(run.mode);i++)stepRun(run,{throttle:true,nitro});return run;}
+function lap(track,configuration,nitro=false){
+  const run=createRun(track,'full',configuration?getVehicleStats(configuration):undefined);
+  for(let i=0;i<120*70&&['countdown','racing'].includes(run.mode);i++){
+    const controls=hazardControls({...run,sections:track.sections});
+    stepRun(run,{...controls,throttle:true,nitro:nitro||controls.nitro});
+  }
+  return run;
+}
 
-test('Default GT dynamics preserve the original timed laps; all donor cars can complete every course',()=>{
+test('The default lap matches the GT and all donor cars can complete every course',()=>{
   const tracks=courses.map(createTrackData);
   for(const track of tracks){
     const original=lap(track),gt=lap(track,DEFAULT_CONFIGURATION);

@@ -1,5 +1,6 @@
 import * as T from 'three';
 import { createTrackFromPoints } from './track.js';
+import { jumpLength, jumpSection, openSection } from './track-surface.js';
 
 const TAU=Math.PI*2, FLOOR=3.4, LIMIT=32;
 const parameter=(key,label,min,max,step,value,unit='m')=>({key,label,min,max,step,default:value,unit});
@@ -9,6 +10,8 @@ export const PIECES=[
   {id:'right',label:'Curva derecha',description:'Giro de 90° con entrada y salida suaves.',parameter:parameter('radius','Radio',16,28,1,18)},
   {id:'left',label:'Curva izquierda',description:'Giro de 90° hacia el lado contrario.',parameter:parameter('radius','Radio',16,28,1,18)},
   {id:'ramp',label:'Rampa',description:'Sube y vuelve al nivel de la pista.',parameters:[parameter('length','Longitud',32,64,2,40),parameter('height','Altura',3,9,1,6)]},
+  {id:'jump',label:'Salto',description:'Hueco sin barandas con recepción a la derecha. Deja una recta antes de la rampa.',parameter:parameter('gap','Hueco',6,14,1,9)},
+  {id:'open',label:'Curva abierta',description:'Curva sin barandas. Frena y corrige la dirección.',parameter:parameter('radius','Radio',16,28,1,22)},
   {id:'loop',label:'Loop',description:'Una inversión completa. Deja una recta de salida.',parameter:parameter('radius','Radio',5.8,9,0.2,7)},
 ];
 const definitions=new Map(PIECES.map(p=>[p.id,p]));
@@ -68,6 +71,8 @@ function makePath(){
 function appendPiece(path,piece,index,width){
   const start=path.points.length?path.points.at(-1).clone():new T.Vector3(path.x,FLOOR,path.z),first=path.points.length;
   if(piece.type==='straight'||piece.type==='short')path.straight(piece.length,index);
+  else if(piece.type==='jump')path.straight(jumpLength(piece.gap),index);
+  else if(piece.type==='open')path.turn(Math.PI/2,piece.radius,index);
   else if(piece.type==='right'||piece.type==='left')path.turn((piece.type==='right'?1:-1)*Math.PI/2,piece.radius,index);
   else if(piece.type==='ramp')path.straight(piece.length,index,u=>piece.height*Math.sin(Math.PI*u)**2);
   else if(piece.type==='loop'){
@@ -86,7 +91,7 @@ function appendPiece(path,piece,index,width){
     }
     path.x=x+Math.sin(h)*48;path.z=z+Math.cos(h)*48;
   }
-  path.segments.push({index,label:definitions.get(piece.type).label,type:piece.type,start:start.toArray(),end:path.points.at(-1).toArray(),points:[start,...path.points.slice(first)].map(p=>p.toArray())});
+  path.segments.push({index,label:definitions.get(piece.type).label,type:piece.type,first:Math.max(0,first-1),last:path.points.length-1,start:start.toArray(),end:path.points.at(-1).toArray(),points:[start,...path.points.slice(first)].map(p=>p.toArray())});
 }
 
 // CSC Dubins candidates give tangent-continuous joins, with the same minimum
@@ -158,6 +163,8 @@ export function buildCustomTrack(input,{close=true}={}){
   let runway=0;
   for(const piece of draft.pieces){if(piece.type==='loop')break;if(piece.type==='straight'||piece.type==='short')runway+=piece.length;else break;}
   if(draft.pieces.some(p=>p.type==='loop')&&runway<24)errors.push('Deja al menos 24 m de recta al inicio antes del primer loop.');
+  const firstObstacle=draft.pieces.find(p=>p.type!=='straight'&&p.type!=='short');
+  if(firstObstacle?.type==='jump'&&runway<24)errors.push('Deja al menos 24 m de recta al inicio antes del primer salto.');
   const base=makePath();draft.pieces.forEach((p,i)=>appendPiece(base,p,i,draft.width));
   if(base.points.length<2)return {draft,track:null,segments:[],closure:null,validation:{valid:false,errors,warnings,length:0,loops:0,closed:false,bounds:null}};
   let path=base,closed=false,closure=null,geometry;
@@ -180,6 +187,12 @@ export function buildCustomTrack(input,{close=true}={}){
   const loops=draft.pieces.filter(p=>p.type==='loop').length;
   const course={id:hashGeometry(draft),name:draft.name,difficulty:'PERSONALIZADA',description:'Un circuito creado en tu taller.',loops,width:draft.width,target:0,color:'#ff8b21',theme:'custom',custom:true};
   const track=createTrackFromPoints(path.points,course,{closed});
+  for(const segment of path.segments){
+    if(segment.type!=='jump'&&segment.type!=='open')continue;
+    const start=track.distanceAtPoint(segment.first),end=track.distanceAtPoint(segment.last);
+    if(segment.type==='jump')track.sections.push(jumpSection(track,start,draft.pieces[segment.index].gap,1,.54,end));
+    else track.sections.push(openSection(start,end));
+  }
   // Authored normal hints keep flat modules upright and the car radial inside
   // the helical loop, rather than accumulating parallel-transport holonomy.
   const matrix=new T.Matrix4(),hints=path.upHints,pointCount=track.curve.points.length;

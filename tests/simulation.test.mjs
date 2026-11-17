@@ -3,12 +3,14 @@ import assert from 'node:assert/strict';
 import { courses } from '../src/courses.js';
 import { createTrackData } from '../src/track.js';
 import { createRun, stepRun, STEP } from '../src/simulation.js';
+import { hazardControls } from './drive-hazards.mjs';
+import { surfaceAt } from '../src/track-surface.js';
 
 const tracks=courses.map(createTrackData);
 const input={throttle:true,brake:false,nitro:false,steerLeft:false,steerRight:false};
 function drive(track,controls=input,assist='full') {
   const run=createRun(track,assist);let ticks=0;
-  while((run.mode==='countdown'||run.mode==='racing')&&ticks++<120*80)stepRun(run,controls);
+  while((run.mode==='countdown'||run.mode==='racing')&&ticks++<120*80)stepRun(run,typeof controls==='function'?controls(run):controls);
   return run;
 }
 test('All five courses form closed, finite, orthonormal frames through their loops',()=>{
@@ -26,11 +28,35 @@ test('All five courses form closed, finite, orthonormal frames through their loo
     }
   }
 });
-test('A beginner can finish every course with full assists and throttle',()=>{
-  for(const track of tracks){const run=drive(track);assert.equal(run.mode,'finished',track.course.name);assert.equal(run.progress,1);assert.equal(run.collisions,0);assert.ok(run.elapsed<35);}
+const steering = run => ({ ...input, ...hazardControls({ ...run, sections: run.track.sections }) });
+test('Even with full assists, every course needs active steering; aligned drivers can finish',()=>{
+  for(const track of tracks){
+    assert.match(drive(track).message,/salto|recepción/,track.course.name);
+    const run=drive(track,steering);
+    assert.equal(run.mode,'finished',`${track.course.name}: ${run.message}`);
+    assert.equal(run.progress,1);assert.equal(run.collisions,0);assert.ok(run.elapsed<35);
+  }
+});
+test('A jump creates a real gap, and low speed or a late steering correction causes a fall',()=>{
+  const track=tracks[0], jump=track.sections[0];
+  assert.equal(surfaceAt(track,jump.start-.01).rails,true);
+  assert.equal(surfaceAt(track,jump.launch-.01).rails,false);
+  assert.equal(surfaceAt(track,(jump.launch+jump.land)/2).gap,true);
+  assert.equal(surfaceAt(track,jump.land).center,jump.landingOffset);
+  const run=createRun(track,'full');run.mode='racing';run.distance=jump.launch-.05;run.speed=12;run.offset=jump.landingOffset;
+  stepRun(run,{});assert.equal(run.event,'jump');assert.ok(run.flight);
+  for(let i=0;i<120&&run.mode==='racing';i++)stepRun(run,{throttle:true,nitro:true});
+  assert.equal(run.mode,'crashed');assert.match(run.message,/quedó corto/);
+  assert.match(drive(track,current=>({...input,steerRight:current.distance>=jump.land})).message,/fuera de la recepción/);
+});
+test('An open curve has no rail rebound even with full assistance',()=>{
+  const track=tracks[4], section=track.sections[1];
+  const run=createRun(track,'full');run.mode='racing';run.distance=section.start+5;run.speed=30;run.offset=-1.8;
+  for(let i=0;i<120&&run.mode==='racing';i++)stepRun(run,input);
+  assert.equal(run.mode,'crashed');assert.match(run.message,/borde abierto/);assert.equal(run.collisions,0);
 });
 test('Nitro consumes a finite reserve and produces a faster timed lap',()=>{
-  const regular=drive(tracks[1]);const boosted=drive(tracks[1],{...input,nitro:true});
+  const regular=drive(tracks[1],steering);const boosted=drive(tracks[1],run=>({...steering(run),nitro:true}));
   assert.equal(boosted.mode,'finished');assert.ok(boosted.elapsed<regular.elapsed-1);assert.ok(boosted.nitro<.2);
   const run=createRun(tracks[0]);run.mode='racing';run.speed=18;
   for(let i=0;i<120;i++)stepRun(run,{...input,nitro:true});

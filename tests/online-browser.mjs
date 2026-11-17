@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { driveHazards } from './drive-hazards.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core');
@@ -68,6 +69,12 @@ try {
   await host.keyboard.down('w');
   await Promise.all([host.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__.distance > 80), guest.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__.distance > 30)]);
   await host.keyboard.up('Shift');
+  let hostJumped = false, guestJumped = false, remoteJumped = false;
+  await Promise.all([
+    driveHazards(host, state => { hostJumped ||= state.airborne; remoteJumped ||= state.online.opponentLift > 1.8; }),
+    driveHazards(guest, state => { guestJumped ||= state.airborne; remoteJumped ||= state.online.opponentLift > 1.8; }),
+  ]);
+  assert.ok(hostJumped && guestJumped && remoteJumped, 'both players jump and receive an airborne pose from the other player');
   await Promise.all([waitMode(host, 'online'), waitMode(guest, 'online')]);
   await Promise.all([host.getByRole('heading', { name: 'Resultados' }).waitFor(), guest.getByRole('heading', { name: 'Resultados' }).waitFor()]);
   const results = page => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__.online.players);
@@ -84,7 +91,7 @@ try {
   await action(guest, 'leave').click();
   await waitMode(guest, 'menu');
   assert.deepEqual(errors, []);
-  console.log('PASS two browsers, copied invitation, duplicate name, host controls, common start, remote car, two finishes, rematch and host transfer');
+  console.log('PASS two browsers, shared start, synchronized jumps, two finishes, rematch and host transfer');
   console.log(JSON.stringify(finished.map(({ name, time }) => ({ name, time }))));
 } finally {
   await browser.close();

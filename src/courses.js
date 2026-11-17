@@ -1,9 +1,11 @@
+export const TRACK_RULES_VERSION = 2;
+
 export const courses = [
-  { id: 'garage', name: 'Garage Run', difficulty: 'FÁCIL', description: 'Tu primera vuelta. Curvas amplias y un loop para sentir la velocidad.', loops: 1, radius: 5.8, span: 21, straight: 76, width: 6.8, target: 31, color: '#f58220', theme: 'garage' },
-  { id: 'district', name: 'Loop District', difficulty: 'MEDIA', description: 'Dos loops consecutivos. Carga el nitro y conserva el impulso.', loops: 2, radius: 7.1, span: 23, straight: 96, width: 6.3, target: 38, color: '#ff7d20', theme: 'district' },
-  { id: 'heights', name: 'Nitro Heights', difficulty: 'DIFÍCIL', description: 'Cambios de altura y curvas rápidas. Elige dónde acelerar.', loops: 2, radius: 8.5, span: 20, straight: 111, width: 5.9, target: 44, color: '#f46a20', theme: 'heights' },
-  { id: 'helix', name: 'Double Helix', difficulty: 'EXPERTA', description: 'Tres inversiones, poco margen. Frena antes de las curvas.', loops: 3, radius: 8.0, span: 18, straight: 126, width: 5.4, target: 49, color: '#ed6020', theme: 'helix' },
-  { id: 'skyline', name: 'Skyline Gauntlet', difficulty: 'EXTREMA', description: 'Loops gigantes y una pista estrecha. Una vuelta para demostrarlo.', loops: 3, radius: 10.0, span: 17, straight: 148, width: 4.9, target: 58, color: '#ee5420', theme: 'skyline' },
+  { id: 'garage', name: 'Garage Run', difficulty: 'FÁCIL', description: 'Una vuelta con curvas amplias, un loop y un primer salto hacia la derecha.', loops: 1, radius: 5.8, span: 21, straight: 76, width: 6.8, target: 31, color: '#f58220', theme: 'garage', jump: { gap: 8, side: 1, landingWidth: .54 } },
+  { id: 'district', name: 'Loop District', difficulty: 'MEDIA', description: 'Conserva el impulso en los dos loops y busca la recepción a la izquierda.', loops: 2, radius: 7.1, span: 23, straight: 96, width: 6.3, target: 38, color: '#ff7d20', theme: 'district', jump: { gap: 10, side: -1, landingWidth: .51 } },
+  { id: 'heights', name: 'Nitro Heights', difficulty: 'DIFÍCIL', description: 'Salta en plena subida y frena para tomar la curva sin barandas.', loops: 2, radius: 8.5, span: 20, straight: 111, width: 5.9, target: 44, color: '#f46a20', theme: 'heights', jump: { gap: 11, side: 1, landingWidth: .49 }, openCurve: 17 },
+  { id: 'helix', name: 'Double Helix', difficulty: 'EXPERTA', description: 'Tres loops, una recepción estrecha a la izquierda y una curva con el borde abierto.', loops: 3, radius: 8.0, span: 18, straight: 126, width: 5.4, target: 49, color: '#ed6020', theme: 'helix', jump: { gap: 12, side: -1, landingWidth: .47 }, openCurve: 23 },
+  { id: 'skyline', name: 'Skyline Gauntlet', difficulty: 'EXTREMA', description: 'Loops gigantes, el salto más largo y una curva sin protección.', loops: 3, radius: 10.0, span: 17, straight: 148, width: 4.9, target: 58, color: '#ee5420', theme: 'skyline', jump: { gap: 14, side: 1, landingWidth: .46 }, openCurve: 29 },
 ];
 
 export const assists = [
