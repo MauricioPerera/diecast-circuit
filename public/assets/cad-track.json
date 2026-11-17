@@ -1,0 +1,146 @@
+{
+  "source": "CADCraft 0.20.1 / craft/start-gantry.dxf",
+  "units": "metres",
+  "trackWidth": 7.2,
+  "gantry": {
+    "openingWidth": 8.2,
+    "height": 4.6,
+    "postWidth": 0.40000000000000036,
+    "beamHeight": 0.40000000000000036,
+    "depth": 0.48,
+    "profiles": [
+      [
+        [
+          -4.5,
+          0
+        ],
+        [
+          -4.1,
+          0
+        ],
+        [
+          -4.1,
+          5
+        ],
+        [
+          -4.5,
+          5
+        ]
+      ],
+      [
+        [
+          4.1,
+          0
+        ],
+        [
+          4.5,
+          0
+        ],
+        [
+          4.5,
+          5
+        ],
+        [
+          4.1,
+          5
+        ]
+      ],
+      [
+        [
+          -4.1,
+          4.6
+        ],
+        [
+          4.1,
+          4.6
+        ],
+        [
+          4.1,
+          5
+        ],
+        [
+          -4.1,
+          5
+        ]
+      ]
+    ]
+  },
+  "finishStripe": {
+    "width": 7.2,
+    "depth": 0.9
+  },
+  "verified": {
+    "entityCount": 4,
+    "drawing": {
+      "blockEditor": null,
+      "blocks": [],
+      "counts": {
+        "Polyline": 4
+      },
+      "currentLayer": "0",
+      "dimStyles": [
+        "Standard",
+        "ISO-25"
+      ],
+      "dirty": false,
+      "entityCount": 4,
+      "extents": [
+        [
+          -4500,
+          -1500
+        ],
+        [
+          4500,
+          5000
+        ]
+      ],
+      "layers": [
+        {
+          "color": "White",
+          "frozen": false,
+          "linetype": "Continuous",
+          "locked": false,
+          "name": "0",
+          "on": true
+        },
+        {
+          "color": "White",
+          "frozen": false,
+          "linetype": "Continuous",
+          "locked": false,
+          "name": "Defpoints",
+          "on": true
+        }
+      ],
+      "layouts": [
+        "Layout1",
+        "Layout2"
+      ],
+      "linetypes": [
+        "ByBlock",
+        "ByLayer",
+        "Continuous"
+      ],
+      "path": "craft/start-gantry.dxf",
+      "readNotes": [],
+      "selection": [],
+      "skipped": {
+        "count": 0,
+        "sections": {}
+      },
+      "space": "Model",
+      "textStyles": [
+        "Standard"
+      ],
+      "title": "start-gantry.dxf",
+      "undo": [],
+      "view": {
+        "center": [
+          0,
+          1750
+        ],
+        "height": 7150.000000000001
+      }
+    }
+  }
+}

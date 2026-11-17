@@ -1,0 +1,46 @@
+name: Publicar Diecast Circuit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      VITE_ROOM_SERVER: ${{ vars.ROOM_SERVER }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/configure-pages@v5
+      - name: Verificar el servidor de salas
+        run: |
+          node -e 'const u = new URL(process.env.VITE_ROOM_SERVER); if (u.protocol !== "https:" || u.username || u.password) throw Error("ROOM_SERVER debe ser la URL HTTPS pública del Worker");'
+          curl --fail --silent --show-error --max-time 15 "${VITE_ROOM_SERVER%/}/health"
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

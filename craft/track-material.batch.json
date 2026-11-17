@@ -1,0 +1,133 @@
+{
+  "open": "craft/track-empty.sbs",
+  "steps": [
+    {
+      "id": "file.importVector",
+      "params": {
+        "path": "craft/plastic-grain.svg",
+        "name": "plastic-grain"
+      }
+    },
+    {
+      "id": "graph.node.add",
+      "params": {
+        "def": "uniform",
+        "label": "Injection-moulded orange",
+        "params": {
+          "color": "#ed6718"
+        }
+      }
+    },
+    {
+      "id": "graph.node.add",
+      "params": {
+        "def": "output",
+        "at": [
+          400,
+          0
+        ],
+        "params": {
+          "identifier": "base",
+          "usage": 0
+        },
+        "connectFrom": {
+          "node": 1
+        }
+      }
+    },
+    {
+      "id": "graph.node.add",
+      "params": {
+        "def": "svg",
+        "at": [
+          0,
+          220
+        ],
+        "label": "Mould micrograin",
+        "params": {
+          "resource": "plastic-grain",
+          "color_mode": false
+        }
+      }
+    },
+    {
+      "id": "graph.node.add",
+      "params": {
+        "def": "levels",
+        "at": [
+          200,
+          220
+        ],
+        "label": "Subtle satin roughness",
+        "params": {
+          "out_low": [
+            0.3,
+            0.3,
+            0.3,
+            0.3
+          ],
+          "out_high": [
+            0.48,
+            0.48,
+            0.48,
+            1
+          ]
+        },
+        "connectFrom": {
+          "node": 3
+        }
+      }
+    },
+    {
+      "id": "graph.node.add",
+      "params": {
+        "def": "output",
+        "at": [
+          400,
+          220
+        ],
+        "params": {
+          "identifier": "roughness",
+          "usage": 2
+        },
+        "connectFrom": {
+          "node": 4
+        }
+      }
+    },
+    {
+      "id": "graph.node.add",
+      "params": {
+        "def": "normal",
+        "at": [
+          200,
+          400
+        ],
+        "params": {
+          "intensity": 0.04
+        },
+        "connectFrom": {
+          "node": 3
+        }
+      }
+    },
+    {
+      "id": "graph.node.add",
+      "params": {
+        "def": "output",
+        "at": [
+          400,
+          400
+        ],
+        "params": {
+          "identifier": "normal",
+          "usage": 1
+        },
+        "connectFrom": {
+          "node": 6
+        }
+      }
+    }
+  ],
+  "save": "craft/track-plastic.sbs"
+}

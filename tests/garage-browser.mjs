@@ -1,0 +1,85 @@
+import { createRequire } from 'node:module';
+import { mkdirSync,writeFileSync,existsSync,renameSync } from 'node:fs';
+import assert from 'node:assert/strict';
+import {configurationKey,DEFAULT_CONFIGURATION} from '../src/vehicles.js';
+const require=createRequire(import.meta.url),{chromium}=require('playwright-core');
+const out='artifacts/garage-qa';mkdirSync(out,{recursive:true});
+const url=process.env.GAME_URL||'http://127.0.0.1:5189/';
+const chrome=process.env.CHROME_PATH||(process.platform==='win32'?'C:/Program Files/Google/Chrome/Application/chrome.exe':undefined);
+const browser=await chromium.launch(chrome&&existsSync(chrome)?{executablePath:chrome,headless:true}:{channel:'chromium',headless:true});
+const report={url,checks:[],errors:[],captures:[],pass:false};
+const check=(name,extra={})=>{report.checks.push({name,pass:true,...extra});console.log(`PASS ${name}`);};
+const state=async p=>{await p.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));return p.evaluate(()=>window.__THREE_GAME_DIAGNOSTICS__);};
+const waitMode=(p,mode,timeout=12000)=>p.waitForFunction(mode=>window.__THREE_GAME_DIAGNOSTICS__?.mode===mode,mode,{timeout});
+const capture=async(p,name)=>{const path=`${out}/${name}.png`;await p.screenshot({path});report.captures.push(path);};
+const action=(p,a)=>p.locator(`[data-garage-action=${a}]`);
+const donor=(p,a,id)=>p.locator(`[data-garage-action=${a}][data-donor=${id}]`);
+const slot=(p,id)=>p.locator(`[data-garage-action=slot][data-slot=${id}]`);
+const choosePart=async(p,s,d)=>{await slot(p,s).click();await donor(p,'part',d).click();};
+const enter=async p=>{await p.locator('.garage-entry').click();await waitMode(p,'garage');};
+function watch(p){p.on('pageerror',e=>report.errors.push(e.message));p.on('console',m=>{if(m.type()==='error')report.errors.push(m.text());});p.on('response',r=>{if(r.status()>=400)report.errors.push(`${r.status()} ${r.url()}`);});}
+try{
+  const context=await browser.newContext({viewport:{width:1440,height:900},recordVideo:{dir:out,size:{width:960,height:600}}});
+  const page=await context.newPage();watch(page);
+  await page.addInitScript(()=>{if(!localStorage.getItem('diecast-circuit.records.v1'))localStorage.setItem('diecast-circuit.records.v1',JSON.stringify({'district-full':22.123}));});
+  await page.goto(`${url}?qa=1`);await waitMode(page,'menu');
+  assert.match(await page.locator('[data-course=district] .course-record').textContent(),/22\.123/);
+  await enter(page);assert.equal(await action(page,'preset').count(),4);await capture(page,'desktop-garage');
+  for(const id of ['gt','muscle','rally','prototype']){
+    await donor(page,'preset',id).click();const d=await state(page);assert.ok(Object.values(d.vehicle.parts).every(v=>v===id),JSON.stringify(d.vehicle.parts));
+    await capture(page,`donor-${id}`);report[`${id}Render`]=d.renderer;
+  }
+  check('four distinct donor presets render all five parts');
+  const camera=(await state(page)).garage.camera,surface=await page.locator('#garage-camera-control').boundingBox();
+  await page.mouse.move(surface.x+surface.width*.45,surface.y+surface.height*.52);await page.mouse.down();await page.mouse.move(surface.x+surface.width*.61,surface.y+surface.height*.55,{steps:10});await page.mouse.up();await page.waitForTimeout(200);
+  assert.notDeepEqual((await state(page)).garage.camera,camera);check('3D orbit responds to drag');
+  await donor(page,'preset','muscle').click();await choosePart(page,'cabin','prototype');await choosePart(page,'wheels','rally');await choosePart(page,'spoiler','gt');await choosePart(page,'exhaust','prototype');
+  const expected={body:'muscle',cabin:'prototype',wheels:'rally',spoiler:'gt',exhaust:'prototype'};
+  assert.deepEqual((await state(page)).vehicle.parts,expected);
+  await page.locator('#garage-name').fill('Híbrido 07');await page.keyboard.press('End');await page.keyboard.type(' RC');
+  assert.equal((await state(page)).mode,'garage');assert.equal(await page.locator('#garage-name').inputValue(),'Híbrido 07 RC');
+  const beforePaint=(await state(page)).garage.key;
+  await page.locator('[data-garage-action=paint][data-color="#d8a52b"]').click();assert.equal((await state(page)).garage.draft.paint,'#d8a52b');assert.equal((await state(page)).garage.key,beforePaint);
+  await page.locator('[data-garage-action=paint][data-color="#c64a2f"]').click();
+  await action(page,'save').click();assert.match(await page.locator('#garage-saved').textContent(),/Híbrido 07 RC/);
+  await capture(page,'desktop-hybrid');await action(page,'apply').click();await waitMode(page,'menu');
+  let current=await state(page);assert.deepEqual(current.vehicle.configuration.parts,expected);assert.notEqual(current.vehicle.key,configurationKey(DEFAULT_CONFIGURATION));
+  assert.equal(await page.locator('.menu-vehicle-name').textContent(),'Híbrido 07 RC');
+  assert.doesNotMatch(await page.locator('[data-course=district] .course-record').textContent(),/22\.123/);
+  check('mix five slots, save named build, apply it, and isolate its record table');
+  const key=current.vehicle.key;
+  await enter(page);const hybridSaveId=await page.locator('#garage-saved').inputValue();
+  await donor(page,'preset','rally').click();assert.equal((await state(page)).vehicle.parts.body,'rally');await action(page,'save-new').click();
+  assert.notEqual(await page.locator('#garage-saved').inputValue(),hybridSaveId);
+  await page.getByRole('button',{name:'Volver sin aplicar',exact:true}).first().click();await waitMode(page,'menu');assert.equal((await state(page)).vehicle.key,key);assert.deepEqual((await state(page)).vehicle.parts,expected);
+  await enter(page);assert.equal(await page.locator('#garage-saved').inputValue(),hybridSaveId);
+  await page.getByRole('button',{name:'Volver sin aplicar',exact:true}).first().click();await waitMode(page,'menu');check('back cancels preview and restores applied hybrid and selected save');
+  await page.reload();await waitMode(page,'menu');assert.equal((await state(page)).vehicle.key,key);await enter(page);
+  assert.match(await page.locator('#garage-saved').textContent(),/Híbrido 07 RC/);await donor(page,'preset','gt').click();await action(page,'load').click();
+  assert.deepEqual((await state(page)).vehicle.parts,expected);await action(page,'apply').click();await waitMode(page,'menu');check('applied car and named library survive reload');
+  await page.locator('[data-course=garage]').click();await page.locator('.start-button').click();await page.keyboard.down('KeyW');await page.keyboard.down('ShiftLeft');await waitMode(page,'racing');
+  await page.waitForTimeout(1100);const moving=await state(page);assert.ok(moving.speed>13&&moving.nitro<1&&moving.vehicle.boostVisible);assert.notEqual(moving.vehicle.wheelRotation,0);assert.deepEqual(moving.vehicle.parts,expected);assert.equal(moving.vehicle.stats.grip,moving.vehicle.runStats.grip);await capture(page,'hybrid-racing');
+  await waitMode(page,'finished',35000);await page.keyboard.up('KeyW');await page.keyboard.up('ShiftLeft');const finished=await state(page);
+  assert.equal(finished.score,1);assert.match(await page.locator('.hud-vehicle-name').textContent(),/Híbrido 07 RC/);
+  const stored=await page.evaluate(()=>JSON.parse(localStorage.getItem('diecast-circuit.records.v2')));assert.ok(stored.profiles[key]['garage-full']>0);
+  assert.equal(stored.profiles[configurationKey(DEFAULT_CONFIGURATION)]['garage-full'],undefined);await capture(page,'hybrid-finished');
+  check('hybrid wheels and exhaust animate, tuned car completes a real lap, saves its own record',{seconds:finished.elapsed,racing:moving.renderer});
+  await page.getByRole('button',{name:/ELEGIR CIRCUITO/}).click();await waitMode(page,'menu');await page.locator('.builder-entry').click();await waitMode(page,'builder');
+  await page.locator('.builder-play').click();await page.keyboard.down('KeyW');await waitMode(page,'racing');await page.waitForTimeout(900);
+  const custom=await state(page);assert.ok(custom.course.startsWith('custom-')&&custom.speed>8);assert.deepEqual(custom.vehicle.parts,expected);await capture(page,'hybrid-custom-track');
+  await page.keyboard.up('KeyW');await page.keyboard.press('Escape');await page.getByRole('button',{name:/VOLVER AL TALLER/}).click();await waitMode(page,'builder');
+  await page.getByRole('button',{name:'Volver al menú',exact:true}).click();await waitMode(page,'menu');check('same hybrid drives on built tracks and returns via workshop');
+  await enter(page);await donor(page,'preset','gt').click();await action(page,'apply').click();await waitMode(page,'menu');
+  assert.match(await page.locator('[data-course=district] .course-record').textContent(),/22\.123/);check('original GT times are preserved');
+
+  const mobile=await browser.newContext({viewport:{width:390,height:844},deviceScaleFactor:1,isMobile:true,hasTouch:true}),phone=await mobile.newPage();watch(phone);
+  await phone.goto(`${url}?qa=1`);await waitMode(phone,'menu');await phone.locator('.garage-entry').tap();await waitMode(phone,'garage');
+  const m=await state(phone);assert.equal(m.garage.viewport.width,390);assert.ok(m.garage.viewport.height>130);
+  await donor(phone,'preset','rally').tap();await capture(phone,'mobile-garage');
+  const box=await action(phone,'apply').boundingBox();assert.ok(box.height>=44&&box.y+box.height<=844);
+  assert.ok(await phone.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await action(phone,'apply').tap();await waitMode(phone,'menu');assert.equal((await state(phone)).vehicle.parts.body,'rally');
+  check('mobile workspace and touch apply fit 390 × 844',{render:m.renderer});await mobile.close();
+  const video=page.video();await context.close();renameSync(await video.path(),`${out}/garage-drive.webm`);
+  assert.deepEqual(report.errors,[]);check('no console, runtime or asset errors');report.pass=true;
+}catch(error){report.failure=error.stack;console.error(error);process.exitCode=1;}
+finally{await browser.close();writeFileSync(`${out}/playtest.json`,JSON.stringify(report,null,2));}
