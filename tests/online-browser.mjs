@@ -55,7 +55,7 @@ try {
   await host.locator('#online-items').selectOption('on');
   await guest.waitForFunction(() => document.querySelector('#online-items').value === 'on');
   await host.locator('#online-course').selectOption('garage');
-  await guest.waitForFunction(() => document.querySelector('#online-course').value === 'garage');
+  await guest.waitForFunction(() => document.querySelector('#online-course').value === 'garage' && document.querySelector('#online-items').value === 'on');
   await action(guest, 'ready').click();
   await host.waitForFunction(() => !document.querySelector('[data-online-action="start"]').disabled);
   mkdirSync('artifacts/online-qa', { recursive: true });
@@ -65,10 +65,10 @@ try {
   await Promise.all([waitMode(host, 'countdown'), waitMode(guest, 'countdown')]);
   const start = page => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__.online.startAt);
   assert.equal(await start(host), await start(guest));
+  await guest.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__.items.boxes === 12);
   await host.keyboard.down('w');
   await host.keyboard.down('Shift');
   await Promise.all([waitMode(host, 'racing'), waitMode(guest, 'racing')]);
-  await guest.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__.items.boxes === 12);
   // Let the host move ahead before the guest starts accelerating.
   await guest.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__.online.opponents > 0);
   await guest.screenshot({ path: 'artifacts/online-qa/remote-car.png' });
@@ -78,6 +78,8 @@ try {
   await guest.keyboard.down('a');
   await guest.waitForFunction(() => Boolean(window.__THREE_GAME_DIAGNOSTICS__.items.held));
   await guest.keyboard.up('a');
+  await guest.keyboard.up('w');
+  await guest.keyboard.down('s');
   await host.waitForFunction(() => Boolean(window.__THREE_GAME_DIAGNOSTICS__.items.held));
   const held = (page) => page.evaluate(() => window.__THREE_GAME_DIAGNOSTICS__.items.held);
   const hostItem = await held(host), guestItem = await held(guest);
@@ -85,14 +87,36 @@ try {
   const gasBounds = await guest.locator('[data-touch=throttle]').boundingBox();
   assert.ok(itemBounds.height >= 44 && itemBounds.y + itemBounds.height < gasBounds.y);
   await guest.screenshot({ path: 'artifacts/online-qa/mobile-item.png' });
-  await guest.waitForFunction(() => Math.abs(window.__THREE_GAME_DIAGNOSTICS__.offset) < .67);
-  await host.keyboard.press('e');
-  await guest.getByRole('button', { name: 'Usar objeto' }).tap();
-  await Promise.all([host, guest].map(page => page.waitForFunction(() => !window.__THREE_GAME_DIAGNOSTICS__.items.held)));
-  if ((hostItem === 'trap' && guestItem !== 'shield') || (guestItem === 'disc' && hostItem !== 'shield')) {
-    await Promise.any([host, guest].map(page => page.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__.stun > 0, undefined, { timeout: 3600 })));
-    console.log(`PASS live impact (${hostItem}, ${guestItem})`);
+  const stopped = await guest.waitForFunction(() => {
+    const { distance, speed, offset } = window.__THREE_GAME_DIAGNOSTICS__;
+    return speed < 1 && Math.abs(offset) < .4 && distance;
+  });
+  await host.waitForFunction(min => window.__THREE_GAME_DIAGNOSTICS__.distance >= min, (await stopped.jsonValue()) + 14);
+  const useHost = () => host.keyboard.press('e');
+  const useGuest = () => guest.getByRole('button', { name: 'Usar objeto' }).tap();
+  const hit = page => page.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__.stun > 0, undefined, { timeout: 8500 });
+  async function resumeGuest() {
+    await guest.keyboard.up('s');
+    await guest.keyboard.down('w');
   }
+  // Set up a lead and a known lane before testing a directional strike.
+  if (hostItem === 'trap') {
+    await useHost();
+    await host.waitForFunction(() => !window.__THREE_GAME_DIAGNOSTICS__.items.held && window.__THREE_GAME_DIAGNOSTICS__.items.hazards > 0);
+    await Promise.all([hit(guest), resumeGuest()]);
+    await useGuest();
+    console.log('PASS live trap impact');
+  } else if (guestItem === 'disc' && hostItem !== 'shield') {
+    await Promise.all([hit(host), useGuest()]);
+    await useHost();
+    await resumeGuest();
+    console.log('PASS live disc impact');
+  } else {
+    await useHost();
+    await useGuest();
+    await resumeGuest();
+  }
+  await Promise.all([host, guest].map(page => page.waitForFunction(() => !window.__THREE_GAME_DIAGNOSTICS__.items.held)));
   await Promise.all([host.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__.distance > 80), guest.waitForFunction(() => window.__THREE_GAME_DIAGNOSTICS__.distance > 30)]);
   await host.keyboard.up('Shift');
   let hostJumped = false, guestJumped = false, remoteJumped = false;

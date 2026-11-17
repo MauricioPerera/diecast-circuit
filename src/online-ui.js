@@ -165,12 +165,9 @@ export function createOnlineUI({ courses, assists, onCreate, onJoin, onReady, on
   });
   bind(start, 'click', () => onStart());
   bind(rematch, 'click', () => onRematch());
-  function changeSettings() {
-    onSettings({ courseId: course.value, assistId: assist.value, itemsEnabled: items.value === 'on' });
-  }
-  bind(course, 'change', changeSettings);
-  bind(assist, 'change', changeSettings);
-  bind(items, 'change', changeSettings);
+  bind(course, 'change', () => onSettings({ courseId: course.value }));
+  bind(assist, 'change', () => onSettings({ assistId: assist.value }));
+  bind(items, 'change', () => onSettings({ itemsEnabled: items.value === 'on' }));
 
   async function copyInvite(withLink) {
     const selectedCode = current.room?.code;
